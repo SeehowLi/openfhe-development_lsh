@@ -244,33 +244,39 @@ bool CKKSPackedEncoding::Encode() {
 }
 #else  // NATIVEINT == 64
 bool CKKSPackedEncoding::Encode() {
+    // this指的是当前变量的指针
     if (this->isEncoded)
         return true;
-    usint ringDim                             = GetElementRingDimension();
+    // 参数传递
+    usint ringDim                             = GetElementRingDimension();//N
     usint slots                               = this->GetSlots();
     std::vector<std::complex<double>> inverse = this->GetCKKSPackedValue();
+    // 判断是否满足超过最大slots数目
     if (slots < inverse.size()) {
         std::string errMsg = std::string("The number of slots [") + std::to_string(slots) +
                              "] is less than the size of data [" + std::to_string(inverse.size()) + "]";
         OPENFHE_THROW(errMsg);
     }
 
-    // clears all imaginary values as CKKS for complex numbers
+    // 虚部清除--OpenFHE中目前只处理实数。不过inverse本身还是一个复数的变量
     for (size_t i = 0; i < inverse.size(); i++)
         inverse[i].imag(0.0);
-
+    // 末尾补0--全槽的数值
     inverse.resize(slots);
 
     if (this->typeFlag == IsDCRTPoly) {
-        DiscreteFourierTransform::FFTSpecialInv(inverse, ringDim * 2);
+        // 结果就存储在inverse之中，但是inverse只有N/2个数值，多项式虚数有N个，所以一半存在了虚部中
+        DiscreteFourierTransform::FFTSpecialInv(inverse, ringDim * 2);//iDFT（iFFT）
         double powP = scalingFactor;
 
         // Compute approxFactor, a value to scale down by, in case the value exceeds a 64-bit integer.
+        // 计算 approxFactor，这是一个缩小值的因子，用于防止值超过 64 位整数。
         int32_t MAX_BITS_IN_WORD = LargeScalingFactorConstants::MAX_BITS_IN_WORD;
 
         int32_t logc = 0;
+        //计算IDFT之后的多项式系数位数的最大值
         for (size_t i = 0; i < slots; ++i) {
-            inverse[i] *= powP;
+            inverse[i] *= powP;//进行缩放
             if (inverse[i].real() != 0) {
                 int32_t logci = static_cast<int32_t>(ceil(log2(std::abs(inverse[i].real()))));
                 if (logc < logci)
@@ -288,7 +294,7 @@ bool CKKSPackedEncoding::Encode() {
         int32_t logValid    = (logc <= MAX_BITS_IN_WORD) ? logc : MAX_BITS_IN_WORD;
         int32_t logApprox   = logc - logValid;
         double approxFactor = pow(2, logApprox);
-
+        //temp用于临时存放明文多项式系数
         std::vector<int64_t> temp(2 * slots);
         for (size_t i = 0; i < slots; ++i) {
             // Scale down by approxFactor in case the value exceeds a 64-bit integer.
@@ -309,7 +315,7 @@ bool CKKSPackedEncoding::Encode() {
                 // this to report it to the user, so they can identify
                 // large inputs.
 
-                DiscreteFourierTransform::FFTSpecial(inverse, ringDim * 2);
+                DiscreteFourierTransform::FFTSpecial(inverse, ringDim * 2);//FFT变回去？
 
                 double invLen = static_cast<double>(inverse.size());
                 double factor = 2 * M_PI * i;
@@ -352,31 +358,39 @@ bool CKKSPackedEncoding::Encode() {
                 buffer << "Scaled input is " << scaledInputSize << " bits " << std::endl;
                 OPENFHE_THROW(buffer.str());
             }
-
+            // 取整
             int64_t re = std::llround(dre);
             int64_t im = std::llround(dim);
-
+            //处理负数，但是加的指好像并不是q啊
+            // 负数的处理是通过将其加上 2^64 来实现的，这是因为负数在计算机中以补码形式表示，
+            // 而我们的目标是将其转换为无符号整数。
             temp[i]         = (re < 0) ? Max64BitValue() + re : re;
             temp[i + slots] = (im < 0) ? Max64BitValue() + im : im;
         }
+        //获取参数，container太多了，都晕了
         const std::shared_ptr<ILDCRTParams<BigInteger>> params           = this->encodedVectorDCRT.GetParams();
         const std::vector<std::shared_ptr<ILNativeParams>>& nativeParams = params->GetParams();
-
+        // 为每个CRT组件创建本地向量，将其表示为适合CRT的形式
         for (size_t i = 0; i < nativeParams.size(); i++) {
             NativeVector nativeVec(ringDim, nativeParams[i]->GetModulus());
+            //将之前temp的值调整到当前的模数范围
             FitToNativeVector(temp, Max64BitValue(), &nativeVec);
+            //创建多项式元素
             NativePoly element = this->GetElement<DCRTPoly>().GetElementAtIndex(i);
+            // 对多项式元素进行赋值
             element.SetValues(std::move(nativeVec), Format::COEFFICIENT);  // output was in coefficient format
             this->encodedVectorDCRT.SetElementAtIndex(i, std::move(element));
         }
 
-        usint numTowers = nativeParams.size();
+        usint numTowers = nativeParams.size();//获取CRT分解的个数
+        // 存储CRT的分解模数
         std::vector<DCRTPoly::Integer> moduli(numTowers);
         for (usint i = 0; i < numTowers; i++) {
             moduli[i] = nativeParams[i]->GetModulus();
         }
-
+        // 获取缩放因子
         DCRTPoly::Integer intPowP(static_cast<uint64_t>(std::llround(powP)));
+        //缩放因子的CRT表示
         std::vector<DCRTPoly::Integer> crtPowP(numTowers, intPowP);
 
         auto currPowP = crtPowP;
@@ -384,6 +398,7 @@ bool CKKSPackedEncoding::Encode() {
         // We want to scale temp by 2^(pd), and the loop starts from j=2
         // because temp is already scaled by 2^p in the re/im loop above,
         // and currPowP already is 2^p.
+        //额外的缩放操作？但是没看懂他要干嘛。。。
         for (size_t i = 2; i < noiseScaleDeg; i++) {
             currPowP = CKKSPackedEncoding::CRTMult(currPowP, crtPowP, moduli);
         }

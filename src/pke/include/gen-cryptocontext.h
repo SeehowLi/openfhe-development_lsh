@@ -30,31 +30,31 @@
 //==================================================================================
 
 /*
-  Constructs CryptoContext based on the provided set of parameters
+  构造基于提供参数集的 CryptoContext
  */
 
 /*
-* HOW TO GENERATE CRYPTOCONTEXT BY CALLING GenCryptoContext()
+* 如何通过调用 GenCryptoContext() 生成 CryptoContext
 *
-* 1. Pick the scheme you want to use. I choose CKKS for our tutorial example.
-* 2. Your code must include this header file and the header with the scheme-specific
-*    context generator (scheme/<scheme>/cryptocontext-<scheme>.h):
+* 1. 选择您想要使用的方案。在我们的教程示例中，我选择 CKKS。
+* 2. 您的代码必须包含此头文件以及方案特定的上下文生成器头文件
+*    (scheme/<scheme>/cryptocontext-<scheme>.h)：
 *       #include "scheme/ckks/cryptocontext-ckks.h"
 *       #include "gen-cryptocontext.h"
-* 3. Create a parameter object to be passed as a parameter in to GenCryptoContext(). Its generic
-*    form would look like this: CCParams<GeneratorName<Element>> parameters
-*    where
-*    - GeneratorName is the name of the class defined in cryptocontext-<scheme>.h. In our case
-*      it is CryptoContextCKKS.
-*    - Element is a template parameter representing integer lattice. So, it can stay Element or
-*      be replaced with Poly, NativePoly or DCRTPoly. I leave "Element".
-*      As the result we can add this line:
+* 3. 创建一个参数对象作为 GenCryptoContext() 的参数。其通用形式如下：
+*       CCParams<GeneratorName<Element>> parameters
+*    其中：
+*    - GeneratorName 是在 cryptocontext-<scheme>.h 中定义的类的名称。在我们的例子中，
+*      它是 CryptoContextCKKS。
+*    - Element 是一个模板参数，表示整数格子。因此，它可以保持为 Element 或替换为
+*      Poly、NativePoly 或 DCRTPoly。在这里我们保持为 "Element"。
+*      因此我们可以添加以下代码：
 *       CCParams<CryptoContextCKKS<Element>> parameters;
-* 4. Adjust the parameters' values with set functions for CCParams<CryptoContextCKKS<Element>> as
-*    the object is created using default values from scheme/cryptocontextparams-defaults.h.
-* 5. Call GenCryptoContext() to generate cryptocontext.
+* 4. 使用 CCParams<CryptoContextCKKS<Element>> 的 set 函数调整参数值，
+*    因为对象是使用 scheme/cryptocontextparams-defaults.h 中的默认值创建的。
+* 5. 调用 GenCryptoContext() 生成 CryptoContext。
 *
-* Now your code should look like this:
+* 现在您的代码应如下所示：
 *       #include "scheme/ckks/cryptocontext-ckks.h"
 *       #include "gen-cryptocontext.h"
 *       ...........................................

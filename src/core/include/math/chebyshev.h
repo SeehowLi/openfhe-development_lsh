@@ -61,6 +61,36 @@ namespace lbcrypto {
  */
 std::vector<double> EvalChebyshevCoefficients(std::function<double(double)> func, double a, double b, uint32_t degree);
 
+/**
+ * Calculate the approximation error of Chebyshev polynomial approximation
+ * for a given function over the range [a,b] with specified degree.
+ *
+ * @anchor SeehowLi
+ * @param func is the function to be approximated
+ * @param a - lower bound of the approximation range
+ * @param b - upper bound of the approximation range  
+ * @param degree - degree of the Chebyshev polynomial
+ * @param numTestPoints - number of test points to evaluate error (default: 1000)
+ * @return the maximum absolute error of the approximation
+ */
+double EvalChebyshevApproximationError(std::function<double(double)> func, double a, double b, 
+                                      uint32_t degree, size_t numTestPoints = 1000);
+
+/**
+ * Calculate the precision (in decimal digits) of Chebyshev polynomial approximation
+ * for a given function over the range [a,b] with specified degree.
+ *
+ * @author Seehow Li
+ * @param func is the function to be approximated
+ * @param a - lower bound of the approximation range
+ * @param b - upper bound of the approximation range
+ * @param degree - degree of the Chebyshev polynomial  
+ * @param numTestPoints - number of test points to evaluate precision (default: 1000)
+ * @return the precision in decimal digits (higher value means better precision)
+ */
+double EvalChebyshevPrecisionDigits(std::function<double(double)> func, double a, double b,
+                                   uint32_t degree, size_t numTestPoints = 1000);
+
 }  // namespace lbcrypto
 
 #endif

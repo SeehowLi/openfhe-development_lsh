@@ -620,6 +620,24 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyPS(ConstCiphertext<DCRTPoly> x,
 }
 
 //------------------------------------------------------------------------------
+// EVAL Minimax SERIES -- By SeehowLi
+//------------------------------------------------------------------------------
+Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalMinimaxSeries_InvSqrt(ConstCiphertext<DCRTPoly> x,
+                                                                  const std::vector<double>& coefficients) const {
+    uint32_t n = Degree(coefficients);
+
+    if(n == 9){
+
+    }
+    else if(n ==16){
+        
+    }
+    else{
+        OPENFHE_THROW("EvalMinimaxSeries_InvSqrt: The degree of the minimax series must be 9 or 16.");
+    }
+}
+
+//------------------------------------------------------------------------------
 // EVAL CHEBYSHEV SERIES
 //------------------------------------------------------------------------------
 
@@ -653,6 +671,7 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalChebyshevSeriesLinear(ConstCipherte
         double beta  = 2 * a / (b - a);
 
         T[0] = cc->EvalMult(x, alpha);
+        // lsh:why this mult need a Rs?
         cc->ModReduceInPlace(T[0]);
         cc->EvalAddInPlace(T[0], -1.0 - beta);
     }
@@ -668,6 +687,7 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalChebyshevSeriesLinear(ConstCipherte
             // compute T_{2i}(y) = 2*T_i(y)^2 - 1
             auto square = cc->EvalSquare(T[i / 2 - 1]);
             T[i - 1]    = cc->EvalAdd(square, square);
+            // lsh:why this mult need a Rs?
             cc->ModReduceInPlace(T[i - 1]);
             cc->EvalAddInPlace(T[i - 1], -1.0);
             // TODO: (Andrey) Do we need this?

@@ -29,6 +29,8 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //==================================================================================
 #include "utils/memory.h"
+#include <cstdint>    // 添加这行来定义 uint8_t
+#include <cstddef>    // 确保 size_t 可用
 
 namespace lbcrypto {
 

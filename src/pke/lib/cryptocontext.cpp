@@ -37,7 +37,7 @@
 
 #include "key/privatekey.h"
 #include "key/publickey.h"
-#include "math/chebyshev.h"
+#include "math/chebyshev.h"//this is why this file can touch to chebyshev
 #include "schemerns/rns-scheme.h"
 #include "scheme/ckksrns/ckksrns-cryptoparameters.h"
 
@@ -540,6 +540,113 @@ Ciphertext<Element> CryptoContextImpl<Element>::EvalDivide(ConstCiphertext<Eleme
                                                            uint32_t degree) const {
     return EvalChebyshevFunction([](double x) -> double { return 1 / x; }, ciphertext, a, b, degree);
 }
+
+template <typename Element>
+Ciphertext<Element> CryptoContextImpl<Element>::EvalInvRoot(ConstCiphertext<Element> ciphertext, double a, double b,
+                                                           uint32_t degree) const {
+    return EvalChebyshevFunction([](double x) -> double { return 1 / std::sqrt(x); }, ciphertext, a, b, degree);
+}
+
+template <typename Element>
+Ciphertext<Element> CryptoContextImpl<Element>::EvalSoftmaxUsingCheb(ConstCiphertext<Element> ciphertext, double a, double b,
+                                                           uint32_t degree, size_t slotsNumInUse) const {
+    auto totalslotsNum = this->GetEncodingParams()->GetBatchSize();
+    // 调试信息
+    std::cout << "=== Softmax Slots Info ===" << std::endl;
+    std::cout << "slotsNumInUse: " << slotsNumInUse << std::endl;
+    std::cout << "totalslotsNum: " << totalslotsNum << std::endl;
+
+    // generate a mask to makesure only valide slots contrubute to the resule
+    std::vector<std::complex<double>> maskValues(totalslotsNum, 0.0);
+    for (size_t i = 0; i < slotsNumInUse; i++) {
+        maskValues[i] = 1.0;  // 有效槽位设为1
+    }
+    auto maskPlaintext = MakeCKKSPackedPlaintext(maskValues);
+
+    // We need context to get keys
+    auto cc = ciphertext->GetCryptoContext();
+    // caculate exp(ciphertext)
+    auto ciphertextExp = EvalChebyshevFunction([](double x) -> double { return std::exp(x); }, ciphertext, a, b, degree);
+    // set uneeded slots = 0
+    ciphertextExp = EvalMult(ciphertextExp, maskPlaintext);
+    std::cout << "=== Computing sum for valid slots only ===" << std::endl;
+    // caculate Sum{exp(cipher)}
+    // auto ciphertextExpSum = ciphertextExp->Clone();
+    // // We need to rotate the ciphertextExpSum to compute the sum of all slots
+    // for(uint32_t i=1; i<slotsNumInUse; i<<=1) {
+    //     std::cout << "Adding rotation by " << i << " positions" << std::endl;
+    //     auto ciphertextRotated = EvalAtIndex(ciphertextExpSum, i);
+    //     ciphertextExpSum = EvalAdd(ciphertextExpSum, ciphertextRotated);
+    // }
+
+    // ** a better way provided by OpenFHE **
+    auto ciphertextExpSum = EvalSum(ciphertextExp, totalslotsNum);
+
+    // double expLower = std::exp(a);
+    double expUpper = std::exp(b);
+    // double sumLowerBound = expLower;  // 至少有一个有效元素
+    // double sumUpperBound = slotsNumInUse * expUpper;  // 只考虑有效元素数量
+    double sumLowerBound = std::exp(b-1);
+    double sumUpperBound = expUpper;  // 只考虑有效元素数量
+    
+    
+    std::cout << "Sum range (valid elements only): [" << sumLowerBound << ", " << sumUpperBound << "]" << std::endl;
+    auto ciphertextInvSum = EvalChebyshevFunction([](double x) -> double { return 1.0 / x; }, 
+                                                 ciphertextExpSum, sumLowerBound, sumUpperBound, 4*degree);
+    auto result = EvalMult(ciphertextExp, ciphertextInvSum);
+    std::cout << "Softmax computation completed with masking" << std::endl;
+    return result;
+    // return ciphertextInvSum;
+}
+
+template <typename Element>
+Ciphertext<Element> CryptoContextImpl<Element>::EvalSoftmaxUsingCho_Algo2(ConstCiphertext<Element> ciphertext, uint32_t degree, 
+                                                                    size_t k, size_t slotsNumInUse, size_t len_softmax) const {
+    /*
+        Perhaps need to modify chebyshev degree to fit different precision requirements.
+    */
+                                                                        
+    // We need context to get keys
+    auto cc = ciphertext->GetCryptoContext();
+
+    double a = static_cast<double>(-ceil(std::log(static_cast<double>(len_softmax))));
+    double b = 0.5;
+    auto totalslotsNum = this->GetEncodingParams()->GetBatchSize();
+    auto cipher_y0 = EvalMult(ciphertext, 1.0/(1 << k));//consume level
+    cipher_y0 = EvalChebyshevFunction([](double x) -> double { return std::exp(x); }, cipher_y0, a, b, degree);//consume level
+
+    // generate a mask to makesure only valide slots contrubute to the resule
+    std::vector<std::complex<double>> maskValues(totalslotsNum, 0.0);
+    for (size_t i = 0; i < slotsNumInUse; i++) {
+        maskValues[i] = 1.0;  // validate index of slot set to 1
+    }
+    auto maskPlaintext = MakeCKKSPackedPlaintext(maskValues);
+    cipher_y0 = EvalMult(cipher_y0, maskPlaintext);
+    auto cipher_yjminus1 = cipher_y0->Clone();
+    // Loop to compute cipher_yk
+    for(size_t j=1;j<=k;j++){
+        // λ_j = (Σ(y_{j-1}²))^(-1/2)
+        auto cipher_yjminus1_square = EvalSquare(cipher_yjminus1);
+        auto cipher_yjminus1_square_sum = EvalSum(cipher_yjminus1_square, totalslotsNum);
+
+        double sum_lower = 0.5 * 1.0/static_cast<double>(len_softmax);// 1/2n
+        double sum_upper = static_cast<double>(len_softmax);// n
+        auto cipher_lamdaj = EvalInvRoot(cipher_yjminus1_square_sum, sum_lower, sum_upper, degree);
+
+        auto cipher_zj = EvalMult(cipher_lamdaj, cipher_yjminus1);// Normalization
+
+        cipher_yjminus1 = EvalSquare(cipher_zj);// Squaring
+
+
+    } 
+    std::cout << "End Loop!" << std::endl;
+    // final result
+    auto cipher_yk = cipher_yjminus1->Clone();                                  
+                                        
+    return cipher_yk;
+
+}
+
 
 }  // namespace lbcrypto
 

@@ -108,21 +108,23 @@ void LeveledSHECKKSRNS::ModReduceInternalInPlace(Ciphertext<DCRTPoly>& ciphertex
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
 
     std::vector<DCRTPoly>& cv = ciphertext->GetElements();
-
+    //原始模数链长度
     size_t sizeQ  = cryptoParams->GetElementParams()->GetParams().size();
+    // 现在的模数链长度
     size_t sizeQl = cv[0].GetNumOfElements();
     size_t diffQl = sizeQ - sizeQl;
-
+    //循环移除最后level个CRT分量,核心步骤，移除的同时进行了RS
     for (size_t l = 0; l < levels; ++l) {
-        for (size_t i = 0; i < cv.size(); ++i) {
+        for (size_t i = 0; i < cv.size(); ++i) {//diffQl + l是用于获取索引的
             cv[i].DropLastElementAndScale(cryptoParams->GetQlQlInvModqlDivqlModq(diffQl + l),
                                           cryptoParams->GetqlInvModq(diffQl + l));
         }
     }
-
+    //减少噪声缩放程度？但是我一直不知道这个是干嘛的。。
+    //好像就是指缩放因子是1次方还是2次方。。，不过就是回归论文之中的，那一篇论文需要再次好好看一下
     ciphertext->SetNoiseScaleDeg(ciphertext->GetNoiseScaleDeg() - levels);
     ciphertext->SetLevel(ciphertext->GetLevel() + levels);
-
+    //更新缩放因子，因为每一层的缩放因子都不一样--论文里面推导的公式，q和delta之间存在关系
     for (usint i = 0; i < levels; ++i) {
         double modReduceFactor = cryptoParams->GetModReduceFactor(sizeQl - 1 - i);
         ciphertext->SetScalingFactor(ciphertext->GetScalingFactor() / modReduceFactor);
@@ -652,15 +654,16 @@ void LeveledSHECKKSRNS::AdjustLevelsAndDepthToOneInPlace(Ciphertext<DCRTPoly>& c
 
 void LeveledSHECKKSRNS::EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand) const {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
-
+    //由operand计算出RNS表示下每一个元素需要乘以的因子
     std::vector<DCRTPoly::Integer> factors = GetElementForEvalMult(ciphertext, operand);
     std::vector<DCRTPoly>& cv              = ciphertext->GetElements();
     for (usint i = 0; i < cv.size(); ++i) {
-        cv[i] = cv[i] * factors;
+        cv[i] = cv[i] * factors;//运算符进行了重载，所以不是简单的相乘
     }
     ciphertext->SetNoiseScaleDeg(ciphertext->GetNoiseScaleDeg() + 1);
-
+    //当前级别的缩放因子
     double scFactor = cryptoParams->GetScalingFactorReal(ciphertext->GetLevel());
+    // ciphertext->GetScalingFactor()是密文的累计缩放因子--？？没太看懂。。。
     ciphertext->SetScalingFactor(ciphertext->GetScalingFactor() * scFactor);
 }
 

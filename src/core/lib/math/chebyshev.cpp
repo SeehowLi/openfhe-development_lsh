@@ -67,4 +67,78 @@ std::vector<double> EvalChebyshevCoefficients(std::function<double(double)> func
     return coefficients;
 }
 
+
+double EvalChebyshevApproximationError(std::function<double(double)> func, double a, double b, 
+                                      uint32_t degree, size_t numTestPoints) {
+    if (!degree) {
+        OPENFHE_THROW("The degree of approximation can not be zero");
+    }
+    
+    if (numTestPoints == 0) {
+        OPENFHE_THROW("Number of test points must be greater than zero");
+    }
+    
+    if (a >= b) {
+        OPENFHE_THROW("Lower bound must be less than upper bound");
+    }
+    
+    // 获取 Chebyshev 系数
+    std::vector<double> coefficients = EvalChebyshevCoefficients(func, a, b, degree);
+    
+    // 计算测试点上的最大误差
+    double maxError = 0.0;
+    double stepSize = (b - a) / (numTestPoints - 1);
+    
+    for (size_t i = 0; i < numTestPoints; ++i) {
+        double x = a + i * stepSize;
+        
+        // 计算真实函数值
+        double trueValue = func(x);
+        
+        // 计算 Chebyshev 逼近值
+        // 将 x 映射到 [-1, 1] 区间
+        double mappedX = (2.0 * x - a - b) / (b - a);
+        
+        // 使用 Chebyshev 多项式计算逼近值
+        double approxValue = 0.0;
+        double T0 = 1.0;              // T_0(x) = 1
+        double T1 = mappedX;          // T_1(x) = x
+        
+        // 处理 T_0 项 (第一个系数需要除以2)
+        approxValue += coefficients[0] / 2.0;
+        
+        if (degree >= 1) {
+            approxValue += coefficients[1] * T1;
+        }
+        
+        // 使用递推关系计算高阶 Chebyshev 多项式: T_n(x) = 2x*T_{n-1}(x) - T_{n-2}(x)
+        for (uint32_t j = 2; j <= degree; ++j) {
+            double T2 = 2.0 * mappedX * T1 - T0;
+            approxValue += coefficients[j] * T2;
+            T0 = T1;
+            T1 = T2;
+        }
+        
+        // 计算绝对误差
+        double error = std::abs(trueValue - approxValue);
+        if (error > maxError) {
+            maxError = error;
+        }
+    }
+    
+    return maxError;
+}
+
+double EvalChebyshevPrecisionDigits(std::function<double(double)> func, double a, double b,
+                                   uint32_t degree, size_t numTestPoints) {
+    double maxError = EvalChebyshevApproximationError(func, a, b, degree, numTestPoints);
+    
+    if (maxError <= 0.0) {
+        return std::numeric_limits<double>::infinity();  // 完美逼近
+    }
+    
+    // 精度位数 = -log10(最大误差)
+    return -std::log10(maxError);
+}
+
 }  // namespace lbcrypto

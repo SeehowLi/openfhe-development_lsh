@@ -167,15 +167,15 @@ std::shared_ptr<std::vector<DCRTPoly>> PKERNS::EncryptZeroCore(const PublicKey<D
     DCRTPoly e0(dgg, elementParams, Format::EVALUATION);
     DCRTPoly e1(dgg, elementParams, Format::EVALUATION);
 
-    uint32_t sizeQ  = pk[0].GetParams()->GetParams().size();
-    uint32_t sizeQl = elementParams->GetParams().size();
+    uint32_t sizeQ  = pk[0].GetParams()->GetParams().size();//pk的模数链个数
+    uint32_t sizeQl = elementParams->GetParams().size();//参数（明文）的模数链个数
 
     DCRTPoly c0, c1;
     if (sizeQl != sizeQ) {
         // Clone public keys because we need to drop towers.
         DCRTPoly p0 = pk[0].Clone();
         DCRTPoly p1 = pk[1].Clone();
-
+        //把相差的最后的模数扔掉
         uint32_t diffQl = sizeQ - sizeQl;
         p0.DropLastElements(diffQl);
         p1.DropLastElements(diffQl);

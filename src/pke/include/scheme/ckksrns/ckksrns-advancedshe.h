@@ -82,6 +82,9 @@ public:
                                              const std::vector<double>& coefficients, double a,
                                              double b) const override;
 
+    Ciphertext<DCRTPoly> EvalMinimaxSeries_InvSqrt(ConstCiphertext<DCRTPoly> ciphertext,
+                                             const std::vector<double>& coefficients) const;
+
     Ciphertext<DCRTPoly> EvalChebyshevSeriesLinear(ConstCiphertext<DCRTPoly> ciphertext,
                                                    const std::vector<double>& coefficients, double a,
                                                    double b) const override;

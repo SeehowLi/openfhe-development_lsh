@@ -196,6 +196,7 @@ if(BUILD_STATIC)
 endif()
 
 if(BUILD_SHARED)
+# turn off the other lib to compile except
     set(OpenFHE_SHARED_LIBS OPENFHEcore OPENFHEpke OPENFHEbinfhe)
 endif()
 

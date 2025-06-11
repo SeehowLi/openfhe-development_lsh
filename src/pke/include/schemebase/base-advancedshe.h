@@ -188,6 +188,22 @@ public:
         OPENFHE_THROW("EvalChebyshevSeries is not supported for the scheme.");
     }
 
+    /**
+   * Method for evaluating Minimax polynomial interpolation for InvSqrt;
+   * coeffs calculated using Sollya
+   *
+   * @author SeehowLi
+   * @param &cipherText input ciphertext
+   * @param &coefficients is the vector of coefficients in Chebyshev expansion
+   * @param a - lower bound of argument for which the coefficients were found
+   * @param b - upper bound of argument for which the coefficients were found
+   * @return the result of polynomial evaluation.
+   */
+    // virtual Ciphertext<Element> EvalMinimaxSeries_InvSqrt(ConstCiphertext<Element> ciphertext,
+    //                                                       const std::vector<double>& coefficients) const {
+    //     OPENFHE_THROW("EvalMinimaxSeries_InvSqrt is not supported for the scheme.");
+    // }
+
     virtual Ciphertext<Element> EvalChebyshevSeriesLinear(ConstCiphertext<Element> ciphertext,
                                                           const std::vector<double>& coefficients, double a,
                                                           double b) const {

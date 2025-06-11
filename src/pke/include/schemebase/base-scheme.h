@@ -1165,6 +1165,14 @@ public:
         return m_AdvancedSHE->EvalChebyshevSeries(ciphertext, coefficients, a, b);
     }
 
+    // Ciphertext<Element> EvalMinimaxSeries_InvSqrt(ConstCiphertext<Element> ciphertext,
+    //                                         const std::vector<double>& coefficients) const {
+    //     VerifyAdvancedSHEEnabled(__func__);
+    //     if (!ciphertext)
+    //         OPENFHE_THROW("Input ciphertext is nullptr");
+    //     return m_AdvancedSHE->EvalMinimaxSeries_InvSqrt(ciphertext, coefficients);
+    // }
+
     Ciphertext<Element> EvalChebyshevSeriesLinear(ConstCiphertext<Element> ciphertext,
                                                   const std::vector<double>& coefficients, double a, double b) const {
         VerifyAdvancedSHEEnabled(__func__);

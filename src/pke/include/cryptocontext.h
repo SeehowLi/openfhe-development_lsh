@@ -50,6 +50,7 @@
 #include "schemerns/rns-cryptoparameters.h"
 
 #include "scheme/scheme-swch-params.h"
+#include "scheme/ckksrns/ckksrns-advancedshe.h"
 
 #include "utils/caller_info.h"
 #include "utils/serial.h"
@@ -356,7 +357,7 @@ protected:
             OPENFHE_THROW(errorMsg);
         }
     }
-
+    //虚数编码
     virtual Plaintext MakeCKKSPackedPlaintextInternal(const std::vector<std::complex<double>>& value,
                                                       size_t noiseScaleDeg, uint32_t level,
                                                       const std::shared_ptr<ParmType> params, usint slots) const {
@@ -1736,8 +1737,8 @@ public:
    * @return new ciphertext for ciphertext1 * ciphertext2
    */
     Ciphertext<Element> EvalMult(ConstCiphertext<Element> ciphertext1, ConstCiphertext<Element> ciphertext2) const {
-        TypeCheck(ciphertext1, ciphertext2);
-
+        TypeCheck(ciphertext1, ciphertext2);//检查密文是否兼容
+        // 获取重线性化密钥
         const auto evalKeyVec = CryptoContextImpl<Element>::GetEvalMultKeyVector(ciphertext1->GetKeyTag());
         if (!evalKeyVec.size()) {
             OPENFHE_THROW("Evaluation key has not been generated for EvalMult");
@@ -2343,10 +2344,10 @@ public:
     }
 
     /**
-   * Rescale - An alias for OpenFHE ModReduceInPlace method.
-   * This is because ModReduceInPlace is called RescaleInPlace in CKKS.
+   * Rescale - OpenFHE ModReduceInPlace 方法的别名。
+   * 因为在 CKKS 中，ModReduceInPlace 被称为 RescaleInPlace。
    *
-   * @param ciphertext - ciphertext to be rescaled in-place
+   * @param ciphertext - 要进行就地重新缩放的密文
    */
     void RescaleInPlace(Ciphertext<Element>& ciphertext) const {
         ValidateCiphertext(ciphertext);
@@ -2619,6 +2620,30 @@ public:
         return GetScheme()->EvalChebyshevSeries(ciphertext, coefficients, a, b);
     }
 
+        /**
+   * Method for evaluating Minimax polynomial interpolation for InvSqrt;
+   * coeffs calculated using Sollya
+   * Supported only in CKKS.
+   *
+   * @anchor SeehowLi
+   * @param cipherText input ciphertext
+   * @param &coefficients is the vector of coefficients in Chebyshev expansion
+   * @param a - lower bound of argument for which the coefficients were found
+   * @param b - upper bound of argument for which the coefficients were found
+   * @return the result of polynomial evaluation.
+   */
+    Ciphertext<Element> EvalMinimaxSeries_InvSqrt(ConstCiphertext<Element> ciphertext,
+                                            const std::vector<double>& coefficients) const {
+        ValidateCiphertext(ciphertext);
+
+        auto ckksScheme = std::dynamic_pointer_cast<AdvancedSHECKKSRNS>(GetScheme());
+        if (!ckksScheme) {
+            OPENFHE_THROW("EvalMinimaxSeries_InvSqrt is only supported in CKKS.");
+        }
+
+        return ckksScheme->EvalMinimaxSeries_InvSqrt(ciphertext, coefficients);
+    }
+
     /**
    * Naive linear method for evaluating Chebyshev polynomial interpolation;
    * first the range [a,b] is mapped to [-1,1] using linear transformation 1 + 2
@@ -2717,6 +2742,48 @@ public:
    */
     Ciphertext<Element> EvalDivide(ConstCiphertext<Element> ciphertext, double a, double b, uint32_t degree) const;
 
+/**
+   * Evaluate approximate division function x^(-1/2) on a ciphertext using the Chebyshev approximation.
+   * Supported only in CKKS.
+   * This function is used to approximate the inverse square root function.
+   * It is used in the softmax function to approximate the inverse square root of the sum of exponentials.
+   *
+   * @author SeehowLi
+   * @param ciphertext input ciphertext
+   * @param a - lower bound of argument for which the coefficients were found
+   * @param b - upper bound of argument for which the coefficients were found
+   * @param degree Desired degree of approximation
+   * @return the result of polynomial evaluation.
+   */
+    Ciphertext<Element> EvalInvRoot(ConstCiphertext<Element> ciphertext, double a, double b, uint32_t degree) const;
+
+     /**
+   * Evaluate approximate softmax function exp(xj)/sum{exp(xi)} on a ciphertext using the Chebyshev approximation.
+   * Supported only in CKKS.
+   *
+   * @author SeehowLi
+   * @param ciphertext input ciphertext
+   * @param a - lower bound of argument for which the coefficients were found
+   * @param b - upper bound of argument for which the coefficients were found
+   * @param degree Desired degree of approximation
+   * @param slotsNumInUse actual slots number in use
+   * @return the result of polynomial evaluation.
+   */
+    Ciphertext<Element> EvalSoftmaxUsingCheb(ConstCiphertext<Element> ciphertext, double a, double b, uint32_t degree, size_t slotsNumInUse) const;
+    
+     /**
+   * Evaluate approximate softmax function exp(xj)/sum{exp(xi)} on a ciphertext using the Chebyshev approximation.
+   * Supported only in CKKS.
+   *
+   * @author SeehowLi
+   * @param ciphertext input ciphertext
+   * @param degree Desired degree of approximation
+   * @param k the iteration number of softmax
+   * @param slotsNumInUse actual slots number in use
+   * @param len_softmax the number of input in softmax
+   * @return the result of polynomial evaluation.
+   */
+    Ciphertext<Element> EvalSoftmaxUsingCho_Algo2(ConstCiphertext<Element> ciphertext, uint32_t degree, size_t k, size_t slotsNumInUse, size_t len_softmax) const;
     //------------------------------------------------------------------------------
     // Advanced SHE EVAL SUM
     //------------------------------------------------------------------------------

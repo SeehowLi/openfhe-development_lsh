@@ -202,6 +202,7 @@ Ciphertext<Element> LeveledSHEBase<Element>::EvalMult(ConstCiphertext<Element> c
                                                       const EvalKey<Element> evalKey) const {
     Ciphertext<Element> ciphertext = EvalMult(ciphertext1, ciphertext2);
 
+    // std::vector<Element>& cv = ciphertext->c();
     std::vector<Element>& cv = ciphertext->GetElements();
     for (auto& c : cv)
         c.SetFormat(Format::EVALUATION);

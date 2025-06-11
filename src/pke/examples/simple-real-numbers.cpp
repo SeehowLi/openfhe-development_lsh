@@ -42,78 +42,58 @@ using namespace lbcrypto;
 int main() {
     // Step 1: Setup CryptoContext
 
-    // A. Specify main parameters
-    /* A1) Multiplicative depth:
-   * The CKKS scheme we setup here will work for any computation
-   * that has a multiplicative depth equal to 'multDepth'.
-   * This is the maximum possible depth of a given multiplication,
-   * but not the total number of multiplications supported by the
-   * scheme.
-   *
-   * For example, computation f(x, y) = x^2 + x*y + y^2 + x + y has
-   * a multiplicative depth of 1, but requires a total of 3 multiplications.
-   * On the other hand, computation g(x_i) = x1*x2*x3*x4 can be implemented
-   * either as a computation of multiplicative depth 3 as
-   * g(x_i) = ((x1*x2)*x3)*x4, or as a computation of multiplicative depth 2
-   * as g(x_i) = (x1*x2)*(x3*x4).
-   *
-   * For performance reasons, it's generally preferable to perform operations
-   * in the shorted multiplicative depth possible.
-   */
+    // A. 指定主要参数
+    /* A1) 乘法深度:
+     * 我们在此设置的 CKKS 方案将适用于任何乘法深度等于 'multDepth' 的计算。
+     * 这是给定乘法的最大可能深度，但不是方案支持的总乘法次数。
+     *
+     * 例如，计算 f(x, y) = x^2 + x*y + y^2 + x + y 的乘法深度为 1，
+     * 但需要总共 3 次乘法。另一方面，计算 g(x_i) = x1*x2*x3*x4 可以
+     * 实现为乘法深度为 3 的计算，例如 g(x_i) = ((x1*x2)*x3)*x4，
+     * 或实现为乘法深度为 2 的计算，例如 g(x_i) = (x1*x2)*(x3*x4)。
+     *
+     * 出于性能原因，通常优先选择以最小乘法深度执行操作。
+     */
     uint32_t multDepth = 1;
 
-    /* A2) Bit-length of scaling factor.
-   * CKKS works for real numbers, but these numbers are encoded as integers.
-   * For instance, real number m=0.01 is encoded as m'=round(m*D), where D is
-   * a scheme parameter called scaling factor. Suppose D=1000, then m' is 10 (an
-   * integer). Say the result of a computation based on m' is 130, then at
-   * decryption, the scaling factor is removed so the user is presented with
-   * the real number result of 0.13.
-   *
-   * Parameter 'scaleModSize' determines the bit-length of the scaling
-   * factor D, but not the scaling factor itself. The latter is implementation
-   * specific, and it may also vary between ciphertexts in certain versions of
-   * CKKS (e.g., in FLEXIBLEAUTO).
-   *
-   * Choosing 'scaleModSize' depends on the desired accuracy of the
-   * computation, as well as the remaining parameters like multDepth or security
-   * standard. This is because the remaining parameters determine how much noise
-   * will be incurred during the computation (remember CKKS is an approximate
-   * scheme that incurs small amounts of noise with every operation). The
-   * scaling factor should be large enough to both accommodate this noise and
-   * support results that match the desired accuracy.
-   */
-    uint32_t scaleModSize = 50;
+    /* A2) 缩放因子的位长度。
+     * CKKS 适用于实数，但这些数字被编码为整数。
+     * 例如，实数 m=0.01 被编码为 m'=round(m*D)，其中 D 是一个称为缩放因子的方案参数。
+     * 假设 D=1000，那么 m' 是 10（一个整数）。假设基于 m' 的计算结果是 130，
+     * 那么在解密时，缩放因子被移除，因此用户看到的实数结果是 0.13。
+     *
+     * 参数 'scaleModSize' 决定了缩放因子 D 的位长度，而不是缩放因子本身。
+     * 后者是实现特定的，并且在某些版本的 CKKS（例如 FLEXIBLEAUTO）中，
+     * 它可能在不同的密文之间有所不同。
+     *
+     * 选择 'scaleModSize' 取决于计算所需的精度，以及其他参数如 multDepth 或安全标准。
+     * 这是因为其他参数决定了计算过程中会引入多少噪声（记住 CKKS 是一个近似方案，
+     * 每次操作都会引入少量噪声）。缩放因子应足够大，以同时容纳这些噪声并支持符合所需精度的结果。
+     */
+    uint32_t scaleModSize = 50;//50位的缩放因子
 
-    /* A3) Number of plaintext slots used in the ciphertext.
-   * CKKS packs multiple plaintext values in each ciphertext.
-   * The maximum number of slots depends on a security parameter called ring
-   * dimension. In this instance, we don't specify the ring dimension directly,
-   * but let the library choose it for us, based on the security level we
-   * choose, the multiplicative depth we want to support, and the scaling factor
-   * size.
-   *
-   * Please use method GetRingDimension() to find out the exact ring dimension
-   * being used for these parameters. Give ring dimension N, the maximum batch
-   * size is N/2, because of the way CKKS works.
-   */
+    /* A3) 明文槽的数量，用于密文中。
+     * CKKS 在每个密文中打包多个明文值。
+     * 槽的最大数量取决于一个称为环维度的安全参数。
+     * 在此示例中，我们不直接指定环维度，而是让库根据我们选择的安全级别、
+     * 我们希望支持的乘法深度以及缩放因子大小来选择它。
+     *
+     * 请使用方法 GetRingDimension() 来找出这些参数所使用的确切环维度。
+     * 给定环维度 N，最大批处理大小为 N/2，这是由于 CKKS 的工作方式决定的。
+     */
     uint32_t batchSize = 8;
 
-    /* A4) Desired security level based on FHE standards.
-   * This parameter can take four values. Three of the possible values
-   * correspond to 128-bit, 192-bit, and 256-bit security, and the fourth value
-   * corresponds to "NotSet", which means that the user is responsible for
-   * choosing security parameters. Naturally, "NotSet" should be used only in
-   * non-production environments, or by experts who understand the security
-   * implications of their choices.
-   *
-   * If a given security level is selected, the library will consult the current
-   * security parameter tables defined by the FHE standards consortium
-   * (https://homomorphicencryption.org/introduction/) to automatically
-   * select the security parameters. Please see "TABLES of RECOMMENDED
-   * PARAMETERS" in  the following reference for more details:
-   * http://homomorphicencryption.org/wp-content/uploads/2018/11/HomomorphicEncryptionStandardv1.1.pdf
-   */
+    /* A4) 所需的安全级别基于 FHE 标准。
+     * 此参数可以取四个值。三个可能的值分别对应于 128 位、192 位和 256 位安全性，
+     * 第四个值对应于 "NotSet"，这意味着用户需要负责选择安全参数。
+     * 自然地，"NotSet" 应仅在非生产环境中使用，或者由了解其选择安全性影响的专家使用。
+     *
+     * 如果选择了给定的安全级别，库将参考当前由 FHE 标准联盟定义的安全参数表
+     * (https://homomorphicencryption.org/introduction/) 来自动选择安全参数。
+     * 有关更多详细信息，请参阅以下参考文献中的 "推荐参数表"：
+     * http://homomorphicencryption.org/wp-content/uploads/2018/11/HomomorphicEncryptionStandardv1.1.pdf
+     */
+    // CCParams<CryptoContextCKKSRNS> parameters是参数容器，包括各种配置参数
     CCParams<CryptoContextCKKSRNS> parameters;
     parameters.SetMultiplicativeDepth(multDepth);
     parameters.SetScalingModSize(scaleModSize);
@@ -134,45 +114,41 @@ int main() {
    */
     auto keys = cc->KeyGen();
 
-    /* B2) Generate the digit size
-   * In CKKS, whenever someone multiplies two ciphertexts encrypted with key s,
-   * we get a result with some components that are valid under key s, and
-   * with an additional component that's valid under key s^2.
-   *
-   * In most cases, we want to perform relinearization of the multiplicaiton
-   * result, i.e., we want to transform the s^2 component of the ciphertext so
-   * it becomes valid under original key s. To do so, we need to create what we
-   * call a relinearization key with the following line.
-   */
+    /* B2) 生成数字大小
+     * 在 CKKS 中，每当有人使用密钥 s 对两个密文进行乘法时，
+     * 我们会得到一个结果，其中一些分量在密钥 s 下有效，
+     * 而另一个附加分量在密钥 s^2 下有效。
+     *
+     * 在大多数情况下，我们希望对乘法结果进行重新线性化，
+     * 即我们希望将密文的 s^2 分量转换为在原始密钥 s 下有效。
+     * 为此，我们需要通过以下代码行创建一个重新线性化密钥。
+     */
     cc->EvalMultKeyGen(keys.secretKey);
 
-    /* B3) Generate the rotation keys
-   * CKKS supports rotating the contents of a packed ciphertext, but to do so,
-   * we need to create what we call a rotation key. This is done with the
-   * following call, which takes as input a vector with indices that correspond
-   * to the rotation offset we want to support. Negative indices correspond to
-   * right shift and positive to left shift. Look at the output of this demo for
-   * an illustration of this.
-   *
-   * Keep in mind that rotations work over the batch size or entire ring dimension (if the batch size is not specified).
-   * This means that, if ring dimension is 8 and batch
-   * size is not specified, then an input (1,2,3,4,0,0,0,0) rotated by 2 will become
-   * (3,4,0,0,0,0,1,2) and not (3,4,1,2,0,0,0,0).
-   * If ring dimension is 8 and batch
-   * size is set to 4, then the rotation of (1,2,3,4) by 2 will become (3,4,1,2).
-   * Also, as someone can observe
-   * in the output of this demo, since CKKS is approximate, zeros are not exact
-   * - they're just very small numbers.
-   */
+    /* B3) 生成旋转密钥
+     * CKKS 支持对打包密文的内容进行旋转，但要实现这一点，
+     * 我们需要创建一个称为旋转密钥的对象。这可以通过以下调用完成，
+     * 它接受一个向量作为输入，其中的索引对应于我们希望支持的旋转偏移量。
+     * 负索引对应右移，正索引对应左移。查看此演示的输出以了解示例。
+     *
+     * 请记住，旋转作用于批处理大小或整个环维度（如果未指定批处理大小）。
+     * 这意味着，如果环维度为 8 且未指定批处理大小，
+     * 那么输入 (1,2,3,4,0,0,0,0) 旋转 2 次将变为 (3,4,0,0,0,0,1,2)，
+     * 而不是 (3,4,1,2,0,0,0,0)。
+     * 如果环维度为 8 且批处理大小设置为 4，
+     * 那么 (1,2,3,4) 的旋转 2 次将变为 (3,4,1,2)。
+     * 此外，正如可以在此演示的输出中观察到的那样，
+     * 由于 CKKS 是近似的，零并不是真正的零——它们只是非常小的数字。
+     */
     cc->EvalRotateKeyGen(keys.secretKey, {1, -2});
 
     // Step 3: Encoding and encryption of inputs
 
-    // Inputs
+    // Inputs--都是实数。。不是虚数-换成虚数试一下
     std::vector<double> x1 = {0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0};
     std::vector<double> x2 = {5.0, 4.0, 3.0, 2.0, 1.0, 0.75, 0.5, 0.25};
 
-    // Encoding as plaintexts
+    // Encoding as plaintexts--直接打包
     Plaintext ptxt1 = cc->MakeCKKSPackedPlaintext(x1);
     Plaintext ptxt2 = cc->MakeCKKSPackedPlaintext(x2);
 
@@ -194,7 +170,7 @@ int main() {
     // Homomorphic scalar multiplication
     auto cScalar = cc->EvalMult(c1, 4.0);
 
-    // Homomorphic multiplication
+    // Homomorphic multiplication--估计里面自动RS并且RLK了
     auto cMul = cc->EvalMult(c1, c2);
 
     // Homomorphic rotations

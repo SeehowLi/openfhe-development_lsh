@@ -386,7 +386,7 @@ public:
     virtual void EvalMultInPlace(Ciphertext<Element>& ciphertext, ConstPlaintext plaintext) const;
 
     /**
-   * Virtual function to define the interface for multiplication of ciphertext
+   * Virtual function to define the interface（接口） for multiplication of ciphertext
    * by plaintext. This is the mutable version - input ciphertext may change
    * (automatically rescaled, or towers dropped).
    *

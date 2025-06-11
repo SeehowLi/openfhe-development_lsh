@@ -30,7 +30,7 @@
 //==================================================================================
 
 /*
-  Example of evaluating arbitrary smooth functions with the Chebyshev approximation using CKKS.
+    使用 Chebyshev 近似和 CKKS 方案对任意光滑函数进行评估的示例。
  */
 
 #include "openfhe.h"
