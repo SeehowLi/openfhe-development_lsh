@@ -2,7 +2,7 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-06-02 23:27:17
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-06-11 09:53:25
+ * @LastEditTime: 2025-06-27 10:11:45
  * @FilePath: \openfhe-development\src\pke\examples\softmax_eval.cpp
  * @Description: approximate softmax function
  * 
@@ -19,6 +19,7 @@ void EvalSoftmaxExample();
 void EvalSoftmaxExample_Cho();
 std::vector<std::complex<double>> ComputeSoftmax(const std::vector<std::complex<double>>& input); 
 void TestInverseSqrtApproximation_Chen();
+void ringPackingTest();
 
 
 int main(int argc, char* argv[]) {
@@ -26,9 +27,9 @@ int main(int argc, char* argv[]) {
 
     // EvalSoftmaxExample();
     
-    // std::cout << "--------------------------------- EVAL SOFTMAX FUNCTION BY Cho---------------------------------"
-    //           << std::endl;
     // EvalSoftmaxExample_Cho();
+
+    // ringPackingTest();
     return 0;
 }
 
@@ -257,6 +258,7 @@ std::vector<std::complex<double>> ComputeSoftmax(const std::vector<std::complex<
     return softmax_result;
 }
 
+//InvSqrt using chebyshev
 void TestInverseSqrtApproximation_Chen() {
     std::cout << "=== x^(-1/2) Chebyshev Approximation Analysis ===" << std::endl;
     
@@ -269,76 +271,169 @@ void TestInverseSqrtApproximation_Chen() {
     };
     
     // 设置逼近区间 [a, b] - 必须是正数区间
-    double a = 0.125;   // 下界
+    double a = 1.0/256.0;   // 下界
     double b = 1.0;  // 上界
-    uint32_t degree = 16;  // 多项式度数
+    uint32_t degree = 32;  // 多项式度数
     
     std::cout << std::fixed << std::setprecision(8);
     std::cout << "\nFunction: x^(-1/2) on [" << a << ", " << b << "]" << std::endl;
     std::cout << "Polynomial degree: " << degree << std::endl;
     std::cout << "----------------------------------------" << std::endl;
+
+    // 计算系数
+    auto coefficients = EvalChebyshevCoefficients(inverseSqrt, a, b, degree);
     
     // 计算逼近误差
-    double maxError = EvalChebyshevApproximationError(inverseSqrt, a, b, degree);
+    double maxError = EvalChebyshevApproximationError(inverseSqrt, a, b, degree, coefficients);
     std::cout << "Maximum absolute error: " << maxError << std::endl;
     
     // 计算精度维数
-    double precisionDigits = EvalChebyshevPrecisionDigits(inverseSqrt, a, b, degree);
-    std::cout << "Precision (decimal digits): " << precisionDigits << std::endl;
-    
-    // 分析不同度数的精度变化
-    std::cout << "\n=== Precision vs Degree Analysis ===" << std::endl;
-    std::cout << "Degree\tMax Error\t\tPrecision (digits)" << std::endl;
-    std::cout << "------\t---------\t\t------------------" << std::endl;
-    
-    for (uint32_t deg = 3; deg <= 10; ++deg) {
-        double error = EvalChebyshevApproximationError(inverseSqrt, a, b, deg);
-        double precision = EvalChebyshevPrecisionDigits(inverseSqrt, a, b, deg);
-        std::cout << deg << "\t" << std::scientific << std::setprecision(6) << error 
-                  << "\t\t" << std::fixed << std::setprecision(2) << precision << std::endl;
-    }
+    double precisionDigits = EvalChebyshevPrecisionDigits(inverseSqrt, a, b, degree, coefficients);
+    std::cout << "Precision (digits): " << precisionDigits << std::endl;
     
     // 显示 Chebyshev 系数
-    std::cout << "\n=== Chebyshev Coefficients for degree " << degree << " ===" << std::endl;
-    auto coefficients = EvalChebyshevCoefficients(inverseSqrt, a, b, degree);
-    for (size_t i = 0; i < coefficients.size(); ++i) {
-        std::cout << "c[" << i << "] = " << std::scientific << std::setprecision(8) 
-                  << coefficients[i] << std::endl;
+    // std::cout << "\n=== Chebyshev Coefficients for degree " << degree << " ===" << std::endl;
+    // for (size_t i = 0; i < coefficients.size(); ++i) {
+    //     std::cout << "c[" << i << "] = " << std::scientific << std::setprecision(8) 
+    //               << coefficients[i] << std::endl;
+    // }
+
+    std::cout << "================== Remez-Newton ==================" << std::endl;
+    // 加权Remez近似的结果
+    std::vector<double> remez_poly8={13.8402265776084348688918600300353053395410080429087,
+    -330.30231375541776259455014025942384818790992306028,
+    3726.6482501724203606228326417338892533966200047035,
+    -21060.443928621267844424940653903288363681320682549,
+    65884.433122419486014043084306114819855206651576107,
+    -1.1943620297249377029791605574530979171222686047278e5,
+    1.24813897967780739332704467364084781037083649617862e5,
+    -69734.080653062218310244918210064240972030685068457,
+    16123.4224505302005410384246075221246062231994098755};
+
+    std::vector<double> remez_poly16 = {19.178480355053953310447819770168738504950680450193,
+    -1229.08034434872635058909893302850287765310972520668,
+    45491.254938255845278300763402686409135153598260506,
+    -9.451772284548826595953901516547732884612483654958e5,
+    1.20845629273147707008970002647072889325379579626483e7,
+    -1.01968108029664395559036491860350669118526962543327e8,
+    5.9619714465561544328159236650328031958678154828313e8,
+    -2.4973270253415289976168061263180512280581616679784e9,
+    7.6595830949205634462466643691373512975801663280381e9,
+    -1.7420528138084951910582373215817641727464918059521e10,
+    2.950758214937015434923832238267296853990019212954e10,
+    -3.706831538059775466347567180637783643494094984964e10,
+    3.40377382079951728619555481613062647751480064715826e10,
+    -2.21854230366203524752469282926333984468739681452306e10,
+    9.7173054240518971201165482218051981232382743610754e9,
+    -2.5639036019826462488286810021436661617468817652622e9,
+    3.078756036729417720526553508507125892488442894146e8};
+
+
+    double maxerror_poly = EvalPolynomialApproximationRelativeError(inverseSqrt, a, b, remez_poly16);
+    std::cout << "Maximum relative error for Remez polynomial: " << maxerror_poly << std::endl;
+    double precision_poly = EvalPolynomialPrecisionDigits(inverseSqrt, a, b, remez_poly8);
+    std::cout << "Precision (digits) for Remez polynomial: " << precision_poly << std::endl;
+    
+    // ========== Newton迭代增强测试 ==========
+    std::cout << "\n=== Newton Iteration Enhancement ===" << std::endl;
+    
+    // 单个值测试
+    double test_x = 0.5;
+    std::cout << "Testing at x = " << test_x << std::endl;
+    
+    // double remez_result = EvalPolynomial(remez_poly16, test_x);
+    // double newton_result = EvalNewtonIteration(remez_poly16, test_x, 5);
+    double remez_result = EvalPolynomial(remez_poly8, test_x);
+    double newton_result = EvalNewtonIteration(remez_poly8, test_x, 5);
+    double exact_value = inverseSqrt(test_x);
+    
+    std::cout << "Remez result:    " << std::fixed << std::setprecision(15) << remez_result << std::endl;
+    std::cout << "Newton result:   " << std::fixed << std::setprecision(15) << newton_result << std::endl;
+    std::cout << "Exact value:     " << std::fixed << std::setprecision(15) << exact_value << std::endl;
+    std::cout << "Remez error:     " << std::scientific << std::setprecision(6) << std::abs(remez_result - exact_value) << std::endl;
+    std::cout << "Newton error:    " << std::scientific << std::setprecision(6) << std::abs(newton_result - exact_value) << std::endl;
+    
+    // 区间精度分析
+    // auto newton_analysis = EvalNewtonEnhancedApproximation(remez_poly16, inverseSqrt, a, b, 5, 1000);
+    auto newton_analysis = EvalNewtonEnhancedApproximation(remez_poly8, inverseSqrt, a, b, 5, 1000);
+    std::cout << "\nNewton-enhanced approximation on [" << a << ", " << b << "]:" << std::endl;
+    std::cout << "Max error: " << std::scientific << std::setprecision(6) << newton_analysis.maxError << std::endl;
+    std::cout << "Precision: " << std::fixed << std::setprecision(2) << newton_analysis.precisionDigits << " digits" << std::endl;
+    std::cout << "Improvement: " << std::scientific << newton_analysis.improvementFactor << "x" << std::endl;
+    
+    // 迭代次数分析
+    std::cout << "\n--- Newton Iterations Analysis ---" << std::endl;
+    std::cout << "Iterations\tMax Error\t\tPrecision (digits)" << std::endl;
+    std::cout << "----------\t---------\t\t------------------" << std::endl;
+    
+    // auto iter_analysis = EvalNewtonIterationAnalysis(remez_poly16, inverseSqrt, a, b, 6, 100);
+    auto iter_analysis = EvalNewtonIterationAnalysis(remez_poly8, inverseSqrt, a, b, 6, 100);
+    for (size_t i = 0; i < iter_analysis.size(); ++i) {
+        std::cout << (i+1) << "\t\t" << std::scientific << std::setprecision(4) << iter_analysis[i].maxError 
+                  << "\t\t" << std::fixed << std::setprecision(2) << iter_analysis[i].precisionDigits << std::endl;
     }
 }
 
-// x^(-1/2) in [0.125, 1.0] degree 16 minimax coefficients -- using sollya
-// index：c0, c1, c2, ..., c16
-// std::vector<double> inverseSqrtCoefficients_16 = {
-//     7.8651000577494472615545734433510411216485229572126,          // c0 
-//     -118.334172206421257459319486176677528930798734959243,        // c1 (x)
-//     1447.8283259073668051398481817155815702289220627149,          // c2 (x^2)
-//     -12651.1998742763880719655984425890144783529292141994,        // c3 (x^3)
-//     80878.850667914528669803087010966608333290920944268,          // c4 (x^4)
-//     -3.87873659346168004903515404862896669730788474161e5,         // c5 (x^5)
-//     1.4206871159263745662745587748872063714883992570628e6,        // c6 (x^6)
-//     -4.0202586353765137660089811847775201169068288306554e6,       // c7 (x^7)
-//     8.8417899176579085494832779559985687036802360002235e6,        // c8 (x^8)
-//     -1.51249666967800698696156681944843054642021585090437e7,      // c9 (x^9)
-//     2.0030712615711983811933412256791334158261327840513e7,        // c10 (x^10)
-//     -2.03098683751543675710887104156972051550425627447135e7,      // c11 (x^11)
-//     1.5454444464766109789359488104752212309438662008134e7,        // c12 (x^12)
-//     -8.5333834474530857722730149460532410099773307495878e6,       // c13 (x^13)
-//     3.22574925598832079715795327371008422202376639673525e6,        // c14 (x^14)
-//     -7.4623003549269075371761697078648342227308357830233e5,       // c15 (x^15)
-//     79633.46950683225426570444163916755408884981338578            // c16 (x^16)
-// };
+void ringPackingTest() {
+    // Test the sparse ring packing
+    std::cout << "=== Ring Packing Test ===" << std::endl;
+    CCParams<CryptoContextCKKSRNS> parameters;
+    parameters.SetSecurityLevel(HEStd_NotSet);
+    parameters.SetRingDim(1 << 4);
 
-// x^(-1/2) in [0.125, 1.0] degree 8 minimax coefficients -- using sollya
-// index：c0, c1, c2, ..., c8
-// std::vector<double> inverseSqrtCoefficients_8 = {
-//     5.7451840735225940750552800360033244445618602829813,         // c0
-//     -42.927230735903967807200581394652935289743556751988,        // c1 (x)
-//     234.76071979544915608532588925745475667362453475232,         // c2 (x^2)
-//     -814.2398036540641779887674777253577059776689322037,         // c3 (x^3)
-//     1800.6157499647011358128579077218671016395667559305,         // c4 (x^4)
-//     -2526.0301792801780840024530925539305538332334599804,        // c5 (x^5)
-//     2171.02078659047653933225993925651062898215426137,           // c6 (x^6)
-//     -1040.90401129487980491019648887409102837959644338427,       // c7 (x^7)
-//     212.959794033816828693563117004474060873978041917916         // c8 (x^8)
-// };
+    uint32_t numSlots = 2; // Number of slots to pack
+    parameters.SetBatchSize(numSlots);
+
+    #if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
+        // Currently, only FIXEDMANUAL and FIXEDAUTO modes are supported for 128-bit CKKS bootstrapping.
+        ScalingTechnique rescaleTech = FIXEDAUTO;
+        usint dcrtBits               = 78;
+        usint firstMod               = 89;
+    #else
+        // All modes are supported for 64-bit CKKS bootstrapping.
+        ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+        usint dcrtBits               = 59;
+        usint firstMod               = 60;
+    #endif
+
+    parameters.SetScalingModSize(dcrtBits);
+    parameters.SetScalingTechnique(rescaleTech);
+    parameters.SetFirstModSize(firstMod);
+
+    uint32_t depth = 2; // Set a small depth for testing
+    parameters.SetMultiplicativeDepth(depth);
+
+    CryptoContext<DCRTPoly> cc = GenCryptoContext(parameters);
+
+    cc->Enable(PKE);
+    cc->Enable(LEVELEDSHE);
+
+    uint32_t ringDim = cc->GetRingDimension();
+    std::cout << "Ring dimension: " << ringDim << std::endl;
+    std::cout << "Number of slots: " << numSlots << std::endl;
+
+    // Generate random input
+    std::vector<double> x;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(0.0, 1.0);
+    for (size_t i = 0; i < numSlots; i++) {
+        x.push_back(dis(gen));
+    }
+
+    Plaintext ptxt = cc->MakeCKKSPackedPlaintext(x, 1, 0, nullptr, numSlots);
+    ptxt->SetLength(numSlots);
+    std::cout << "Input: " << ptxt << std::endl;
+
+    //Get to plaintext polynomial coefficients
+    auto poly_ptxt = ptxt->GetElement<DCRTPoly>();
+    std::cout << "Number of towers: " << poly_ptxt.GetNumOfElements() << std::endl;
+
+    auto tower0 = poly_ptxt.GetElementAtIndex(0);
+    std::cout << "Tower 0 coefficients (first 16):" << std::endl;
+    for (size_t i = 0; i < std::min(usint(16), tower0.GetLength()); ++i) {
+        std::cout << "coeff[" << i << "] = " << tower0[i] << std::endl;
+    }
+    
+}
+

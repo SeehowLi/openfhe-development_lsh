@@ -627,10 +627,10 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalMinimaxSeries_InvSqrt(ConstCipherte
     uint32_t n = Degree(coefficients);
 
     if(n == 9){
-
+        return EvalPolyLinear(x, coefficients);
     }
-    else if(n ==16){
-        
+else if(n ==16){
+        return EvalPolyLinear(x, coefficients);
     }
     else{
         OPENFHE_THROW("EvalMinimaxSeries_InvSqrt: The degree of the minimax series must be 9 or 16.");
