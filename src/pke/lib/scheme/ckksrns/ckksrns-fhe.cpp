@@ -56,7 +56,7 @@
 namespace lbcrypto {
 
 //------------------------------------------------------------------------------
-// Bootstrap Wrapper
+// Bootstrap Wrapper -- 自举封装
 //------------------------------------------------------------------------------
 
 void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
@@ -76,7 +76,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
     uint32_t M     = cc.GetCyclotomicOrder();
     uint32_t slots = (numSlots == 0) ? M / 4 : numSlots;
 
-    // Set correction factor by default, if it is not already set.--缩放因子？
+    // Set correction factor by default, if it is not already set.-- 校正因子
     // correctionFactor应该是用来纠正缩放因子，保证精度的
     if (correctionFactor == 0) {
         if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO ||
@@ -114,7 +114,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
     }
 
     // Perform some checks on the level budget and compute parameters
-    //levelbudget究竟是用在哪里，哪里消耗了这个层数？？？
+    //levelbudget--StC和CtS所消耗的层级，不能太大也不能太小
     std::vector<uint32_t> newBudget = levelBudget;
 
     if (newBudget[0] > logSlots) {
@@ -134,7 +134,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         std::cerr << "\nWarning, the level budget for decoding can not be zero. Setting it to 1" << std::endl;
         newBudget[1] = 1;
     }
-    //难道是用在了en/decode的线性变换中？//为什么bs gs要分开给enc和dec呢？
+    // 分别预计算StC和CtS的参数
     precom->m_paramsEnc = GetCollapsedFFTParams(slots, newBudget[0], dim1[0]);
     precom->m_paramsDec = GetCollapsedFFTParams(slots, newBudget[1], dim1[1]);
 
@@ -163,8 +163,8 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         ksiPows[m] = ksiPows[0];
 //======================================  矩阵预计算 ======================================//
 
-        // Extract the modulus prior to bootstrapping
-        //底层模式or此时模数？
+        // Extract the modulus prior to bootstrapping -- 在自举之前提取模数
+        //底层模式or此时模数？--这里的模数是指密文的模数吗？--是的
         NativeInteger q = cryptoParams->GetElementParams()->GetParams()[0]->GetModulus().ConvertToInt();
         double qDouble  = q.ConvertToDouble();
         //factor是离q最近的2的整数次幂
@@ -753,6 +753,92 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
     }
 
     return ctxtDec;
+}
+
+//------------------------------------------------------------------------------
+// 新增：直接调用的Slots-to-Coefficients和Coefficients-to-Slots方法
+//------------------------------------------------------------------------------
+Ciphertext<DCRTPoly> FHECKKSRNS::EvalStC(ConstCiphertext<DCRTPoly> ciphertext) const {
+    
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
+    if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
+        OPENFHE_THROW("CKKS Bootstrapping is only supported for the Hybrid key switching method.");
+#if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
+    if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO || cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
+        OPENFHE_THROW("128-bit CKKS Bootstrapping is supported for FIXEDMANUAL and FIXEDAUTO methods only.");
+#endif
+    auto cc        = ciphertext->GetCryptoContext();
+    uint32_t slots = ciphertext->GetSlots();
+
+    auto pair = m_bootPrecomMap.find(slots);
+    if (pair == m_bootPrecomMap.end()) {
+        std::string errorMsg(std::string("Precomputations for ") + std::to_string(slots) +
+                             std::string(" slots were not generated") +
+                             std::string(" Need to call EvalBootstrapSetup and then EvalBootstrapKeyGen to proceed"));
+        OPENFHE_THROW(errorMsg);
+    }
+    const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;
+
+    // 判断是否使用线性变换模式
+    bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
+                         (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
+    if (isLTBootstrap) {
+    // 线性变换模式：使用预计算的线性变换矩阵
+    if (precom->m_U0Pre.empty()) {
+        OPENFHE_THROW("Linear transform matrix for decoding is empty. Please regenerate precomputations.");
+    }
+        // 调用线性变换
+        return EvalLinearTransform(precom->m_U0Pre, ciphertext);
+    } else {
+        // FFT模式：使用预计算的FFT变换矩阵
+        if (precom->m_U0PreFFT.empty()) {
+            OPENFHE_THROW("FFT transform matrix for decoding is empty. Please regenerate precomputations.");
+        }
+        
+        // 调用SlotsToCoeffs变换
+        return EvalSlotsToCoeffs(precom->m_U0PreFFT, ciphertext);
+    }
+}
+
+Ciphertext<DCRTPoly> FHECKKSRNS::EvalCtS(ConstCiphertext<DCRTPoly> ciphertext) const {
+    
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
+    if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
+        OPENFHE_THROW("CKKS Bootstrapping is only supported for the Hybrid key switching method.");
+#if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
+    if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO || cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
+        OPENFHE_THROW("128-bit CKKS Bootstrapping is supported for FIXEDMANUAL and FIXEDAUTO methods only.");
+#endif
+    
+    auto cc        = ciphertext->GetCryptoContext();
+    uint32_t slots = ciphertext->GetSlots();
+
+    auto pair = m_bootPrecomMap.find(slots);
+    if (pair == m_bootPrecomMap.end()) {
+        std::string errorMsg(std::string("Precomputations for ") + std::to_string(slots) +
+                             std::string(" slots were not generated") +
+                             std::string(" Need to call EvalBootstrapSetup and then EvalBootstrapKeyGen to proceed"));
+        OPENFHE_THROW(errorMsg);
+    }
+    const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;
+
+    // 判断是否使用线性变换模式
+    bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
+                         (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
+    
+    if (isLTBootstrap) {
+        // 线性变换模式：CoeffsToSlots使用编码参数
+        if (precom->m_U0hatTPre.empty()) {
+            OPENFHE_THROW("Linear transform matrix for encoding is empty. Please regenerate precomputations.");
+        }
+        return EvalLinearTransform(precom->m_U0hatTPre, ciphertext);
+    } else {
+        // FFT模式：CoeffsToSlots使用编码参数
+        if (precom->m_U0hatTPreFFT.empty()) {
+            OPENFHE_THROW("FFT transform matrix for encoding is empty. Please regenerate precomputations.");
+        }
+        return EvalCoeffsToSlots(precom->m_U0hatTPreFFT, ciphertext);
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -1863,73 +1949,80 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalCoeffsToSlots(const std::vector<std::vector
     return result;
 }
 
+// 关键线性变换
+// 输入：预计算的变换矩阵A（U矩阵）、密文ctxt
+// 输出：变换后的密文
 Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector<ConstPlaintext>>& A,
                                                    ConstCiphertext<DCRTPoly> ctxt) const {
-    uint32_t slots = ctxt->GetSlots();
-
-    auto pair = m_bootPrecomMap.find(slots);
-    if (pair == m_bootPrecomMap.end()) {
+    uint32_t slots = ctxt->GetSlots();//获取有效槽数目
+    // pair是一个迭代器
+    auto pair = m_bootPrecomMap.find(slots);//根据槽数目查找相应的预计算参数--主要就是预计算的矩阵，包括<key,value>
+    if (pair == m_bootPrecomMap.end()) {//没找到--报错
         std::string errorMsg(std::string("Precomputations for ") + std::to_string(slots) +
                              std::string(" slots were not generated") +
                              std::string(" Need to call EvalBootstrapSetup and EvalBootstrapKeyGen to proceed"));
         OPENFHE_THROW(errorMsg);
     }
 
-    const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;
+    const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;//只获取预计算的参数
 
-    auto cc = ctxt->GetCryptoContext();
+    auto cc = ctxt->GetCryptoContext();//获取加密上下文(context)，即加密的各种信息，cc是一个容器
 
-    uint32_t M = cc->GetCyclotomicOrder();
-    uint32_t N = cc->GetRingDimension();
+    uint32_t M = cc->GetCyclotomicOrder();//M数值
+    uint32_t N = cc->GetRingDimension();//环维度N=M/2
 
-    int32_t levelBudget     = precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET];
-    int32_t layersCollapse  = precom->m_paramsDec[CKKS_BOOT_PARAMS::LAYERS_COLL];
-    int32_t remCollapse     = precom->m_paramsDec[CKKS_BOOT_PARAMS::LAYERS_REM];
-    int32_t numRotations    = precom->m_paramsDec[CKKS_BOOT_PARAMS::NUM_ROTATIONS];
-    int32_t b               = precom->m_paramsDec[CKKS_BOOT_PARAMS::BABY_STEP];
-    int32_t g               = precom->m_paramsDec[CKKS_BOOT_PARAMS::GIANT_STEP];
-    int32_t numRotationsRem = precom->m_paramsDec[CKKS_BOOT_PARAMS::NUM_ROTATIONS_REM];
-    int32_t bRem            = precom->m_paramsDec[CKKS_BOOT_PARAMS::BABY_STEP_REM];
-    int32_t gRem            = precom->m_paramsDec[CKKS_BOOT_PARAMS::GIANT_STEP_REM];
+    int32_t levelBudget     = precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET];//StC过程给他的层级预算
+    int32_t layersCollapse  = precom->m_paramsDec[CKKS_BOOT_PARAMS::LAYERS_COLL];//层级压缩=log(slots)/levelBudget
+    int32_t remCollapse     = precom->m_paramsDec[CKKS_BOOT_PARAMS::LAYERS_REM];//剩余层级压缩=log2(slots) % levelBudget
+    int32_t numRotations    = precom->m_paramsDec[CKKS_BOOT_PARAMS::NUM_ROTATIONS];//旋转次数=bs*gs
+    int32_t b               = precom->m_paramsDec[CKKS_BOOT_PARAMS::BABY_STEP];//bs
+    int32_t g               = precom->m_paramsDec[CKKS_BOOT_PARAMS::GIANT_STEP];//gs
+    int32_t numRotationsRem = precom->m_paramsDec[CKKS_BOOT_PARAMS::NUM_ROTATIONS_REM];//处理余项旋转次数
+    int32_t bRem            = precom->m_paramsDec[CKKS_BOOT_PARAMS::BABY_STEP_REM];//余项的bs
+    int32_t gRem            = precom->m_paramsDec[CKKS_BOOT_PARAMS::GIANT_STEP_REM];//余项的gs
 
-    auto algo = cc->GetScheme();
+    auto algo = cc->GetScheme();//获取CKKS方案的所有实现函数接口
 
-    int32_t flagRem = 0;
+    int32_t flagRem = 0;//标记是否存在余项
 
     if (remCollapse != 0) {
         flagRem = 1;
     }
 
     // precompute the inner and outer rotations
-
+    // rot_in:内层bs的旋转索引，二维矩阵，外层是levelBudget，内存是每个层级的分量
+    // 实际上是告诉我们每个levelBudget的bs索引的具体旋转值->rot_in[层级][baby_step_索引] = 具体的旋转值
+    // 下面的rot_out同理
     std::vector<std::vector<int32_t>> rot_in(levelBudget);
     for (uint32_t i = 0; i < uint32_t(levelBudget); i++) {
         if (flagRem == 1 && i == uint32_t(levelBudget - 1)) {
             // remainder corresponds to index 0 in encoding and to last index in decoding
-            rot_in[i] = std::vector<int32_t>(numRotationsRem + 1);
+            rot_in[i] = std::vector<int32_t>(numRotationsRem + 1);//如果存在余项，最后一个位置放余项的索引
         }
         else {
             rot_in[i] = std::vector<int32_t>(numRotations + 1);
         }
     }
-
+    // 外层gs的旋转索引，二维矩阵，外层是levelBudget，内存是每个层级的分量
     std::vector<std::vector<int32_t>> rot_out(levelBudget);
     for (uint32_t i = 0; i < uint32_t(levelBudget); i++) {
         rot_out[i] = std::vector<int32_t>(b + bRem);
     }
 
     for (int32_t s = 0; s < levelBudget - flagRem; s++) {
+        // 内层旋转的具体值
         for (int32_t j = 0; j < g; j++) {
             rot_in[s][j] =
                 ReduceRotation((j - int32_t((numRotations + 1) / 2) + 1) * (1 << (s * layersCollapse)), M / 4);
         }
-
+        // 外层旋转的具体值
         for (int32_t i = 0; i < b; i++) {
             rot_out[s][i] = ReduceRotation((g * i) * (1 << (s * layersCollapse)), M / 4);
         }
     }
-
+    // 对存在余项的情况进行进行专门的旋转索引计算
     if (flagRem) {
+        // 在最后一个层级处理余项
         int32_t s = levelBudget - flagRem;
         for (int32_t j = 0; j < gRem; j++) {
             rot_in[s][j] =
@@ -1944,29 +2037,33 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
     //  No need for Encrypted Bit Reverse
     Ciphertext<DCRTPoly> result = ctxt->Clone();
 
-    // hoisted automorphisms
+    // hoisted automorphisms -- 提升的自同构
     for (int32_t s = 0; s < levelBudget - flagRem; s++) {
         if (s != 0) {
+            // 除了levelBudget的第一个层级，其他层级都需要进行ModReduce操作--为了减少噪声？
             algo->ModReduceInternalInPlace(result, BASE_NUM_LEVELS_TO_DROP);
         }
         // computes the NTTs for each CRT limb (for the hoisted automorphisms used later on)
+        // 预计算NTT以支持后续的快速旋转操作
         auto digits = cc->EvalFastRotationPrecompute(result);
-
+        // 这是一个密文向量，用于存储快速旋转的结果
         std::vector<Ciphertext<DCRTPoly>> fastRotation(g);
-#pragma omp parallel for
+#pragma omp parallel for //OpenMP并行计算
         for (int32_t j = 0; j < g; j++) {
             if (rot_in[s][j] != 0) {
+                // 旋转值非0，进行快速旋转，返回密文模数为PQ
                 fastRotation[j] = cc->EvalFastRotationExt(result, rot_in[s][j], digits, true);
             }
             else {
+                // 不旋转，单纯扩模为PQ
                 fastRotation[j] = cc->KeySwitchExt(result, true);
             }
         }
 
-        Ciphertext<DCRTPoly> outer;
-        DCRTPoly first;
+        Ciphertext<DCRTPoly> outer;//外层累加器
+        DCRTPoly first;//第一个多项式组件
         for (int32_t i = 0; i < b; i++) {
-            Ciphertext<DCRTPoly> inner;
+            Ciphertext<DCRTPoly> inner;//内层累加器
             // for the first iteration with j=0:
             int32_t G = g * i;
             inner     = EvalMultExt(fastRotation[0], A[s][G]);

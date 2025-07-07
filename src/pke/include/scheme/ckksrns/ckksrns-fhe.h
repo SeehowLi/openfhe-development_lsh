@@ -152,6 +152,22 @@ public:
 
     Ciphertext<DCRTPoly> EvalBootstrap(ConstCiphertext<DCRTPoly> ciphertext, uint32_t numIterations,
                                        uint32_t precision) const override;
+    //------------------------------------------------------------------------------
+    // 新增：Slots-to-Coefficients和Coefficients-to-Slots 直接调用接口
+    //------------------------------------------------------------------------------ 
+    /**
+     * 直接执行Slots-to-Coefficients变换，可以直接调用
+     * @param ciphertext 输入密文
+     * @return 变换后的密文
+     */
+    Ciphertext<DCRTPoly> EvalStC(ConstCiphertext<DCRTPoly> ciphertext) const;  
+
+    /**
+     * 直接执行Coefficients-to-Slots变换的便捷方法，可以直接调用
+     * @param ciphertext 输入密文
+     * @return 变换后的密文
+     */
+    Ciphertext<DCRTPoly> EvalCtS(ConstCiphertext<DCRTPoly> ciphertext) const;                                       
 
     //------------------------------------------------------------------------------
     // Find Rotation Indices

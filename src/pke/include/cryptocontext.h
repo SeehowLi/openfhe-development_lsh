@@ -3406,6 +3406,29 @@ public:
                                       uint32_t precision = 0) const {
         return GetScheme()->EvalBootstrap(ciphertext, numIterations, precision);
     }
+    
+    //------------------------------------------------------------------------------
+    // StC和CtS的直接调用
+    //------------------------------------------------------------------------------
+    /**
+   * StC的实现
+   *
+   * @param ciphertext the input ciphertext.
+   * @return the ciphertext in coeff-encoded.
+   */
+    Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
+        return GetScheme()->EvalStC(ciphertext);
+    }
+    
+    /**
+   * CtS的实现
+   *
+   * @param ciphertext the input ciphertext.
+   * @return the ciphertext in slot-encoded.
+   */
+    Ciphertext<Element> EvalCtS(ConstCiphertext<Element> ciphertext) const {
+        return GetScheme()->EvalCtS(ciphertext);
+    }
 
     //------------------------------------------------------------------------------
     // Scheme switching Methods

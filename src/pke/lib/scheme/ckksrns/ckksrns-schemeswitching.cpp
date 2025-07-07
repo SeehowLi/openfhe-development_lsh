@@ -2238,4 +2238,10 @@ std::vector<Ciphertext<DCRTPoly>> SWITCHCKKSRNS::EvalMaxSchemeSwitchingAlt(Const
     return cRes;
 }
 
+// ============================ 离散CKKS =========================== //
+void SwitchToDiscreteCKKS(){
+
+    
+}
+
 }  // namespace lbcrypto

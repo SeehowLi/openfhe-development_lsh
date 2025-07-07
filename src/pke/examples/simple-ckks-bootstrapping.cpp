@@ -104,7 +104,7 @@ void SimpleBootstrapExample() {
     // is used for scaling the ciphertext before next bootstrapping (in 64-bit CKKS bootstrapping)
     uint32_t levelsAvailableAfterBootstrap = 10;
     usint depth = levelsAvailableAfterBootstrap + FHECKKSRNS::GetBootstrapDepth(levelBudget, secretKeyDist);
-    parameters.SetMultiplicativeDepth(depth);
+    parameters.SetMultiplicativeDepth(depth);//这里定义好要BTS到的目标层数
 
     CryptoContext<DCRTPoly> cryptoContext = GenCryptoContext(parameters);
 

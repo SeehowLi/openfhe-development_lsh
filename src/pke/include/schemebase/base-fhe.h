@@ -131,6 +131,26 @@ public:
     }
 
     /**
+   * Defines the SlotToCoeff procedure
+   *
+   * @param ciphertext the input ciphertext.
+   * @return the ciphertext after StC.
+   */
+    virtual Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
+        OPENFHE_THROW("EvalStC is not implemented for this scheme");
+    }
+
+    /**
+   * Defines the CoeffToSlot procedure
+   *
+   * @param ciphertext the input ciphertext.
+   * @return the ciphertext after CtS.
+   */
+    virtual Ciphertext<Element> EvalCtS(ConstCiphertext<Element> ciphertext) const {
+        OPENFHE_THROW("EvalCtS is not implemented for this scheme");
+    }
+
+    /**
    * Sets all parameters for switching from CKKS to FHEW
    *
    * @param params objects holding all necessary paramters

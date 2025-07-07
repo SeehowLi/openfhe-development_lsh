@@ -47,6 +47,7 @@ enum PKESchemeFeature {
     MULTIPARTY   = 0x20,
     FHE          = 0x40,
     SCHEMESWITCH = 0x80,
+    DISCRETECKKS = 0x100, //新增离散CKKS的标志位
 };
 
 enum ScalingTechnique {

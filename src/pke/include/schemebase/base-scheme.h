@@ -122,6 +122,8 @@ public:
             Enable(FHE);
         if (mask & SCHEMESWITCH)
             Enable(SCHEMESWITCH);
+        if (mask & DISCRETECKKS)
+            Enable(DISCRETECKKS);
     }
 
     uint32_t GetEnabled() const {
@@ -142,6 +144,8 @@ public:
             flag |= FHE;
         if (m_SchemeSwitch != nullptr)
             flag |= SCHEMESWITCH;
+        if (m_DiscreteCKKS != nullptr)
+            flag |= DISCRETECKKS;
         return flag;
     }
 
@@ -177,6 +181,10 @@ public:
                 break;
             case SCHEMESWITCH:
                 if (m_SchemeSwitch != nullptr)
+                    return true;
+                break;
+            case DISCRETECKKS:
+                if (m_DiscreteCKKS != nullptr)
                     return true;
                 break;
             default:
@@ -1416,6 +1424,18 @@ public:
         return m_FHE->EvalBootstrap(ciphertext, numIterations, precision);
     }
 
+    Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
+    VerifyDISCRETECKKSEnabled(__func__);
+    return m_DiscreteCKKS->EvalStC(ciphertext);
+    }
+
+    Ciphertext<Element> EvalCtS(ConstCiphertext<Element> ciphertext) const {
+    VerifyDISCRETECKKSEnabled(__func__);
+    return m_DiscreteCKKS->EvalCtS(ciphertext);
+    }
+
+
+
     // SCHEMESWITCHING methods
 
     LWEPrivateKey EvalCKKStoFHEWSetup(const SchSwchParams& params) {
@@ -1690,6 +1710,18 @@ public:
             OPENFHE_THROW(errMsg);
         }
     }
+    /**
+    * @brief VerifyFHEEnabled is to check if Enable(DISCRETECKKS) has been called and if it has not
+    *        it will thow an exception
+    * @param functionName is the calling function name. __func__ can be used instead
+    */
+    inline void VerifyDISCRETECKKSEnabled(const std::string& functionName) const {
+        if (m_DiscreteCKKS == nullptr) {
+            std::string errMsg =
+                std::string(functionName) + " operation has not been enabled. Enable(DISCRETECKKS) must be called to enable it.";
+            OPENFHE_THROW(errMsg);
+        }
+    }
 
     /**
     * @brief VerifySchemeSwitchEnabled is to check if Enable(SCHEMESWITCH) has been called and if it has not
@@ -1729,6 +1761,7 @@ protected:
     std::shared_ptr<MultipartyBase<Element>> m_Multiparty;
     std::shared_ptr<FHEBase<Element>> m_FHE;
     std::shared_ptr<FHEBase<Element>> m_SchemeSwitch;
+    std::shared_ptr<FHEBase<Element>> m_DiscreteCKKS;
 };
 
 }  // namespace lbcrypto
