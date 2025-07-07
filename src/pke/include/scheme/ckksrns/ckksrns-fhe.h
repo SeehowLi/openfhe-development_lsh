@@ -160,14 +160,14 @@ public:
      * @param ciphertext 输入密文
      * @return 变换后的密文
      */
-    Ciphertext<DCRTPoly> EvalStC(ConstCiphertext<DCRTPoly> ciphertext) const;  
+    Ciphertext<DCRTPoly> EvalStC(ConstCiphertext<DCRTPoly> ciphertext) const override;  
 
     /**
      * 直接执行Coefficients-to-Slots变换的便捷方法，可以直接调用
      * @param ciphertext 输入密文
      * @return 变换后的密文
      */
-    Ciphertext<DCRTPoly> EvalCtS(ConstCiphertext<DCRTPoly> ciphertext) const;                                       
+    Ciphertext<DCRTPoly> EvalCtS(ConstCiphertext<DCRTPoly> ciphertext) const override;                                       
 
     //------------------------------------------------------------------------------
     // Find Rotation Indices

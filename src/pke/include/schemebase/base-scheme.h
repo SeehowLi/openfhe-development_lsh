@@ -1425,14 +1425,19 @@ public:
     }
 
     Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
-    VerifyDISCRETECKKSEnabled(__func__);
-    return m_DiscreteCKKS->EvalStC(ciphertext);
+    VerifyFHEEnabled(__func__);
+    return m_FHE->EvalStC(ciphertext);
     }
 
     Ciphertext<Element> EvalCtS(ConstCiphertext<Element> ciphertext) const {
-    VerifyDISCRETECKKSEnabled(__func__);
-    return m_DiscreteCKKS->EvalCtS(ciphertext);
+    VerifyFHEEnabled(__func__);
+    return m_FHE->EvalCtS(ciphertext);
     }
+
+    // Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
+    // VerifyDISCRETECKKSEnabled(__func__);
+    // return m_DiscreteCKKS->EvalStC(ciphertext);
+    // }
 
 
 

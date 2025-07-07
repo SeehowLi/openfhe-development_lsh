@@ -1,0 +1,3943 @@
+====== BUILD CONFIGURATION ======
+Generated on: 2025年07月 7日 16:45:15
+
+//===== Main CMakeLists.txt =====
+##
+## CMakeLists.txt for OpenFHE
+##
+## This script will build machine-specific header files for compile
+## as it generates the Makefile
+##
+## Note many user options are handled using an OPTION in CMake
+## An option has the value of ON or OFF
+## See below for the list of options
+
+cmake_minimum_required (VERSION 3.5.1)
+
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+endif()
+
+### To use gcc/g++ on a Macintosh, you must set the Compilers
+### here, not inside the project
+##if(APPLE)
+##       set(CMAKE_C_COMPILER "/usr/local/bin/gcc-10")
+##       set(CMAKE_CXX_COMPILER "/usr/local/bin/g++-10")
+##endif()
+### TODO: for now, we use CLang for Mac
+
+project (OpenFHE C CXX)
+
+set(OPENFHE_VERSION_MAJOR 1)
+set(OPENFHE_VERSION_MINOR 2)
+set(OPENFHE_VERSION_PATCH 4)
+set(OPENFHE_VERSION ${OPENFHE_VERSION_MAJOR}.${OPENFHE_VERSION_MINOR}.${OPENFHE_VERSION_PATCH})
+
+set(CMAKE_CXX_STANDARD 17)
+set(CXX_STANDARD_REQUIRED ON)
+
+#--------------------------------------------------------------------
+# Build options
+#--------------------------------------------------------------------
+if(CMAKE_BUILD_TYPE)
+    set(RELEASE_TYPES Debug Release RelWithDebInfo MinSizeRel)
+    list(FIND RELEASE_TYPES ${CMAKE_BUILD_TYPE} INDEX_FOUND)
+    if(${INDEX_FOUND} EQUAL -1)
+        message(FATAL_ERROR "CMAKE_BUILD_TYPE must be one of Debug, Release, RelWithDebInfo, or MinSizeRel" )
+    endif()
+else()
+    # if no build type is chosen, default to Release mode
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Choose the type of build, options are: None, Debug, Release, RelWithDebInfo, or MinSizeRel." FORCE )
+endif()
+
+message(STATUS "Building in ${CMAKE_BUILD_TYPE} mode" )
+
+if ( EMSCRIPTEN )
+    set(BUILD_SHARED OFF)
+    message( "Shared library is not supported by Emscripten")
+    option( BUILD_STATIC "Set to ON to build static versions of the library"         ON  )
+    option( BUILD_UNITTESTS "Set to ON to build unit tests for the library"          OFF )
+    option( BUILD_EXAMPLES "Set to ON to build examples for the library"             OFF )
+    option( BUILD_BENCHMARKS "Set to ON to build benchmarks for the library"         OFF )
+    set(WITH_OPENMP OFF)
+    message( "OpenMP is not supported by Emscripten" )
+else()
+    option( BUILD_SHARED "Set to ON to build shared versions of the library"         ON  )
+    option( BUILD_STATIC "Set to ON to build static versions of the library"         OFF )
+    option( BUILD_UNITTESTS "Set to ON to build unit tests for the library"          ON  )
+    option( BUILD_EXAMPLES "Set to ON to build examples for the library"             ON  )
+    option( BUILD_BENCHMARKS "Set to ON to build benchmarks for the library"         ON  )
+    option( WITH_OPENMP "Use OpenMP to enable <omp.h>"                               ON  )
+endif()
+
+option( BUILD_EXTRAS "Set to ON to build extras for the library"                     OFF )
+option( GIT_SUBMOD_AUTO "Submodules auto-update"                                     ON  )
+option( WITH_BE2 "Include MATHBACKEND 2 in build by setting WITH_BE2 to ON"          OFF )
+option( WITH_BE4 "Include MATHBACKEND 4 in build by setting WITH_BE4 to ON"          OFF )
+option( WITH_NTL "Include MATHBACKEND 6 and NTL in build by setting WITH_NTL to ON"  OFF )
+option( WITH_TCM "Activate tcmalloc by setting WITH_TCM to ON"                       OFF )
+option( WITH_NATIVEOPT "Use machine-specific optimizations"                          OFF )
+option( WITH_COVTEST "Turn on to enable coverage testing"                            OFF )
+option( WITH_NOISE_DEBUG "Use only when running lattice estimator; not for production" OFF )
+option( USE_MACPORTS "Use MacPorts installed packages"                               OFF )
+
+# Set required number of bits for native integer in build by setting NATIVE_SIZE to 64 or 128
+if( NOT NATIVE_SIZE )
+    set( NATIVE_SIZE 64 )
+endif()
+
+if( NOT CKKS_M_FACTOR )
+    set( CKKS_M_FACTOR 1 )
+endif()
+
+### Print options
+message( STATUS "BUILD_UNITTESTS:  ${BUILD_UNITTESTS}")
+message( STATUS "BUILD_EXAMPLES:   ${BUILD_EXAMPLES}")
+message( STATUS "BUILD_BENCHMARKS: ${BUILD_BENCHMARKS}")
+message( STATUS "BUILD_EXTRAS:     ${BUILD_EXTRAS}")
+message( STATUS "BUILD_STATIC:     ${BUILD_STATIC}")
+message( STATUS "BUILD_SHARED:     ${BUILD_SHARED}")
+message( STATUS "GIT_SUBMOD_AUTO:  ${GIT_SUBMOD_AUTO}")
+message( STATUS "WITH_BE2:         ${WITH_BE2}")
+message( STATUS "WITH_BE4:         ${WITH_BE4}")
+message( STATUS "WITH_NTL:         ${WITH_NTL}")
+message( STATUS "WITH_TCM:         ${WITH_TCM}")
+message( STATUS "WITH_OPENMP:      ${WITH_OPENMP}")
+message( STATUS "NATIVE_SIZE:      ${NATIVE_SIZE}")
+message( STATUS "CKKS_M_FACTOR:    ${CKKS_M_FACTOR}")
+message( STATUS "WITH_NATIVEOPT:   ${WITH_NATIVEOPT}")
+message( STATUS "WITH_COVTEST:     ${WITH_COVTEST}")
+message( STATUS "WITH_NOISE_DEBUG: ${WITH_NOISE_DEBUG}")
+message( STATUS "USE_MACPORTS:     ${USE_MACPORTS}")
+
+#--------------------------------------------------------------------
+# Compiler logic
+#--------------------------------------------------------------------
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    # require at least gcc 9.0
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+        message(WARNING "GCC version should be at least 9.0.")
+    endif()
+elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    # require at least clang 10
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10)
+        message(WARNING "Clang version should be at least 10.0.")
+    endif()
+else()
+    message(WARNING "You are using ${CMAKE_CXX_COMPILER_ID} version ${CMAKE_CXX_COMPILER_VERSION}, which is unsupported.")
+endif()
+
+# use, i.e. don't skip the full RPATH for the build tree
+set(CMAKE_SKIP_BUILD_RPATH  FALSE)
+
+# when building, don't use the install RPATH already
+# (but later on when installing)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+
+set(CMAKE_INSTALL_RPATH "${LIBINSTALL}")
+
+# add the automatically determined parts of the RPATH
+# which point to directories outside the build tree to the install RPATH
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# the RPATH to be used when installing, but only if it's not a system directory
+LIST(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${LIBINSTALL}" isSystemDir)
+if("${isSystemDir}" STREQUAL "-1")
+    set(CMAKE_INSTALL_RPATH "${LIBINSTALL}")
+endif("${isSystemDir}" STREQUAL "-1")
+
+# Compiler flags
+
+# Added -Wno-parentheses for compatibility with g++
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    set (IGNORE_WARNINGS "-Wno-parentheses")
+    # we can use GNU built-in functions provided by GCC for debugging. ex: __builtin_LINE (), __builtin_FUNCTION (), __builtin_FILE ()
+    add_definitions(-DBUILTIN_INFO_AVAILABLE)
+    message (STATUS "BUILTIN_INFO_AVAILABLE is defined")
+endif()
+
+if( WITH_NATIVEOPT )
+    set (NATIVE_OPT "-march=native")
+else()
+    set (NATIVE_OPT "")
+endif()
+
+set(C_COMPILE_FLAGS "-Wall -Werror -O3 ${NATIVE_OPT} -DOPENFHE_VERSION=${OPENFHE_VERSION}")
+set(CXX_COMPILE_FLAGS "-Wall -Werror -O3 ${NATIVE_OPT} -DOPENFHE_VERSION=${OPENFHE_VERSION} ${IGNORE_WARNINGS}")
+
+if ( EMSCRIPTEN )
+    set(EMSCRIPTEN_IGNORE_WARNINGS "-Wno-unused-but-set-variable -Wno-unknown-warning-option")
+    set(C_COMPILE_FLAGS "${C_COMPILE_FLAGS} ${EMSCRIPTEN_IGNORE_WARNINGS}")
+    set(CXX_COMPILE_FLAGS "${CXX_COMPILE_FLAGS} ${EMSCRIPTEN_IGNORE_WARNINGS}")
+    add_compile_options(-fexceptions)
+    add_link_options(
+        -sINITIAL_MEMORY=2047MB -sMAXIMUM_MEMORY=4GB -sALLOW_MEMORY_GROWTH=1
+        -sMALLOC=emmalloc -sNO_DISABLE_EXCEPTION_CATCHING
+    )
+endif()
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${C_COMPILE_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CXX_COMPILE_FLAGS}")
+
+if(WITH_COVTEST)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --coverage")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
+    link_libraries(gcov)
+    set( BUILDDIR ${CMAKE_CURRENT_SOURCE_DIR}/build/)
+    set( COVDIR ${BUILDDIR}coverage/)
+endif()
+
+if(UNIX AND NOT APPLE AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    # OpenFHE may use an external shared object provided by user for PRNG and linked with g++ on Linux.
+    # In order to ensure that OpenFHE can dynamically load shared objects at runtime, add an additional library:
+    set(ADDITIONAL_LIBS "-ldl")
+endif()
+
+if(BUILD_STATIC)
+    set(OpenFHE_STATIC_LIBS OPENFHEcore_static OPENFHEpke_static OPENFHEbinfhe_static)
+endif()
+
+if(BUILD_SHARED)
+# turn off the other lib to compile except
+    set(OpenFHE_SHARED_LIBS OPENFHEcore OPENFHEpke OPENFHEbinfhe)
+endif()
+
+set(OpenFHE_PACKAGE_LIBS ${OpenFHE_STATIC_LIBS} ${OpenFHE_SHARED_LIBS})
+
+#--------------------------------------------------------------------
+# Installation logic
+#--------------------------------------------------------------------
+
+
+### set up for install
+set(INSTALL_LIB_DIR lib CACHE PATH "Installation directory for libraries")
+set(INSTALL_INCLUDE_DIR include/openfhe CACHE PATH "Installation directory for headers")
+if(WIN32 AND NOT CYGWIN)
+    set(DEF_INSTALL_CMAKE_DIR CMake)
+else()
+    set(DEF_INSTALL_CMAKE_DIR lib/OpenFHE)
+endif()
+set(INSTALL_CMAKE_DIR ${DEF_INSTALL_CMAKE_DIR} CACHE PATH "Installation directory for CMake files")
+
+foreach(p LIB INCLUDE CMAKE)
+    set(var INSTALL_${p}_DIR)
+    if(NOT IS_ABSOLUTE "${${var}}")
+        set(${var} "${CMAKE_INSTALL_PREFIX}/${${var}}")
+    endif()
+endforeach()
+
+message("***** INSTALL IS AT ${CMAKE_INSTALL_PREFIX}; to change, run cmake with -DCMAKE_INSTALL_PREFIX=/your/path")
+set (CMAKE_INSTALL_MESSAGE LAZY)
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
+#--------------------------------------------------------------------
+# Uninstall logic
+#--------------------------------------------------------------------
+## clobber cleans and deletes the third-party stuff
+add_custom_target(
+        COMMAND make clean
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+add_custom_target("uninstall" COMMENT "Uninstall OpenFHE files")
+add_custom_command(
+        TARGET "uninstall"
+        POST_BUILD
+        COMMENT "Uninstall files within install_manifest.txt"
+        COMMAND ../scripts/uninstall_openfhe.sh
+        USES_TERMINAL
+)
+
+
+#--------------------------------------------------------------------
+# Machine-specific checks
+#--------------------------------------------------------------------
+# determine the architecture on a Linux/Unix/macOS/MinGW system
+if(CMAKE_HOST_UNIX OR MINGW)
+    EXECUTE_PROCESS( COMMAND uname -m COMMAND tr -d '\n' OUTPUT_VARIABLE ARCHITECTURE )
+else()
+    set(ARCHITECTURE "unknown")
+endif()
+
+if(ARCHITECTURE)
+    if (${ARCHITECTURE} MATCHES "i386")
+        message(SEND_ERROR "The " ${ARCHITECTURE} " architecture is not supported")
+    else()
+        message(STATUS "Architecture is " ${ARCHITECTURE})
+    endif()
+endif()
+
+# Size checks
+include(CheckTypeSize)
+check_type_size("__int128" INT128)
+check_type_size("uint64_t" INT64)
+
+if (NOT(BUILD_SHARED OR BUILD_STATIC))
+    message(SEND_ERROR "Either BUILD_SHARED or BUILD_STATIC neeed to be turned on.")
+endif()
+
+if( "${NATIVE_SIZE}" EQUAL 128 )
+    if ( EMSCRIPTEN )
+        message(SEND_ERROR "NATIVE_SIZE == 128 is not supported for EMSCRIPTEN")
+    endif()
+    if( ${HAVE_INT128} )
+        set( NATIVEINT 128 )
+        message (STATUS "NATIVEINT is set to " ${NATIVEINT})
+    else()
+        message(SEND_ERROR "Cannot support NATIVE_SIZE == 128")
+    endif()
+elseif( "${NATIVE_SIZE}" EQUAL 64 )
+    if ( EMSCRIPTEN )
+        set( HAVE_INT128 FALSE)
+    endif()
+    if( ${HAVE_INT64} )
+        set( NATIVEINT 64 )
+        message (STATUS "NATIVEINT is set to " ${NATIVEINT})
+    else()
+        message(SEND_ERROR "Cannot support NATIVE_SIZE == 64")
+    endif()
+elseif( "${NATIVE_SIZE}" EQUAL 32 )
+    if( ${HAVE_INT64} )
+        set( NATIVEINT 32 )
+        set( HAVE_INT128 FALSE)
+        message (STATUS "NATIVEINT is set to " ${NATIVEINT})
+    else()
+        message(SEND_ERROR "Cannot support NATIVE_SIZE == 32")
+    endif()
+else()
+    message(SEND_ERROR "NATIVE_SIZE is " ${NATIVE_SIZE})
+    message(SEND_ERROR "***ERROR*** need a Native implementation")
+endif()
+
+
+#--------------------------------------------------------------------
+# Backend logic
+#--------------------------------------------------------------------
+if( NOT MATHBACKEND)
+    set( MATHBACKEND 4 )
+endif()
+
+message (STATUS "MATHBACKEND is set to " ${MATHBACKEND})
+
+if( "${NATIVEINT}" EQUAL 128 )
+    if( "${MATHBACKEND}" EQUAL 6 )
+        set (WITH_NTL OFF)
+        set (MATHBACKEND 4)
+        message (STATUS "MATHBACKEND 6 is not compatible with 128-bit native backend. Setting MATHBACKEND to 4.")
+    elseif( WITH_NTL )
+        set (WITH_NTL OFF)
+        message (STATUS "MATHBACKEND 6 is not compatible with 128-bit native backend. Setting WITH_NTL to OFF.")
+    endif()
+endif()
+
+if( "${MATHBACKEND}" EQUAL 2 )
+    if( NOT WITH_BE2 )
+        set (WITH_BE2 ON)
+        message(STATUS "MATHBACKEND set to 2. Setting WITH_BE2 to ON")
+    endif()
+elseif( "${MATHBACKEND}" EQUAL 4 )
+    if( NOT WITH_BE4 )
+        set (WITH_BE4 ON)
+        message(STATUS "MATHBACKEND set to 4. Setting WITH_BE4 to ON")
+    endif()
+elseif( "${MATHBACKEND}" EQUAL 6 )
+    if( NOT WITH_NTL )
+        set (WITH_NTL ON)
+        message(STATUS "MATHBACKEND set to 6. Setting WITH_NTL to ON")
+    endif()
+else()
+    message(SEND_ERROR "MATHBACKEND must be 2, 4 or 6")
+endif()
+
+set(OpenFHE_BACKEND_FLAGS "-DMATHBACKEND=${MATHBACKEND}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenFHE_BACKEND_FLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenFHE_BACKEND_FLAGS}")
+
+if(WITH_TCM)
+    message(STATUS "tcmalloc is turned ON")
+    if(MINGW)
+        message(SEND_ERROR "***ERROR*** tcmalloc is not supported for MinGW")
+    endif()
+endif()
+
+### build configure_core.h to make options available
+configure_file(./configure/config_core.in src/core/config_core.h)
+install(FILES ${CMAKE_BINARY_DIR}/src/core/config_core.h DESTINATION include/openfhe/core)
+
+find_program(TAR "gtar")
+find_program(TAR "tar")
+
+if(WITH_TCM OR WITH_NTL)
+    ### tcmalloc, NTL and GMP require autoconf/automake/libtool to be installed.
+    ### we need to make sure that they are:
+    execute_process(COMMAND autogen --version OUTPUT_VARIABLE AUTOGEN_VER)
+    # execute_process in MINGW by default does not run in a shell
+    if(MINGW)
+        execute_process(COMMAND sh autoconf --version OUTPUT_VARIABLE AUTOCONF_VER)
+    else()
+        execute_process(COMMAND autoconf --version OUTPUT_VARIABLE AUTOCONF_VER)
+    endif()
+
+    string(LENGTH "${AUTOCONF_VER}" AUTOCONF_VER_LEN)
+    if( ${AUTOCONF_VER_LEN} EQUAL 0 )
+        message(SEND_ERROR "Autoconf is not installed.")
+    endif()
+endif()
+
+#--------------------------------------------------------------------
+# OpenMP logic
+#--------------------------------------------------------------------
+if (WITH_OPENMP)
+    # Used to optionally compile openmp code
+    add_definitions(-DPARALLEL)
+
+    # Set OpenMP configuration manually for macOS
+    if (APPLE)
+        if (USE_MACPORTS)
+            # Macports-based installation
+            message( STATUS "Using Macports setup")
+            set(OPENMP_LIBRARIES "/opt/local/lib/libomp")
+            set(OPENMP_INCLUDES "/opt/local/include/libomp")
+            if(CMAKE_C_COMPILER_ID MATCHES "Clang" OR CMAKE_C_COMPILER_ID MATCHES "AppleClang")
+                set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -lomp -Wno-unused-command-line-argument")
+                set(OpenMP_C_LIB_NAMES "omp")
+                set(OpenMP_omp_LIBRARY ${OpenMP_C_LIB_NAMES})
+            endif()
+            if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+                set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -lomp -Wno-unused-command-line-argument")
+                set(OpenMP_CXX_LIB_NAMES "omp")
+                set(OpenMP_omp_LIBRARY ${OpenMP_CXX_LIB_NAMES})
+            endif()
+        else (USE_MACPORTS)
+            # Homebrew-based installation
+            # Check for Apple M1 Processor
+            if (${ARCHITECTURE} MATCHES "arm64")
+                message( STATUS "Apple M1 detected")
+                set(OPENMP_LIBRARIES "/opt/homebrew/opt/libomp/lib")
+                set(OPENMP_INCLUDES "/opt/homebrew/opt/libomp/include")
+            else() # Apple Intel Processor
+                message( STATUS "Apple Intel detected")
+                set(OPENMP_LIBRARIES "/usr/local/opt/libomp/lib")
+                set(OPENMP_INCLUDES "/usr/local/opt/libomp/include")
+            endif()
+
+            if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+                set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -lomp -Wno-unused-command-line-argument")
+                set(OpenMP_C_LIB_NAMES "libomp")
+                set(OpenMP_libomp_LIBRARY ${OpenMP_C_LIB_NAMES})
+            endif()
+            if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+                set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -lomp -Wno-unused-command-line-argument")
+                set(OpenMP_CXX_LIB_NAMES "libomp")
+                set(OpenMP_libomp_LIBRARY ${OpenMP_CXX_LIB_NAMES})
+            endif()
+        endif (USE_MACPORTS)
+
+        include_directories("${OPENMP_INCLUDES}")
+        link_directories("${OPENMP_LIBRARIES}")
+        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+        set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+
+        message( STATUS "OPENMP_LIBRARIES: " ${OPENMP_LIBRARIES})
+        message( STATUS "OPENMP_INCLUDES: " ${OPENMP_INCLUDES})
+        message( STATUS "OpenMP_CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
+        message( STATUS "OpenMP_CXX_LIB_NAMES: " ${OpenMP_CXX_LIB_NAMES})
+    endif()
+
+    find_package (OpenMP)
+    # OpenMP_CXX_FOUND was added in cmake 3.9.x so we are also checking the OpenMP_FOUND flag
+    if (OpenMP_CXX_FOUND OR OpenMP_FOUND)
+        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+        set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+    else()
+        message(SEND_ERROR "** ERROR ** OpenMP is not installed. If using macOS/clang, please run 'cmake ..' again.")
+    endif()
+
+    if (OpenMP_C_FOUND OR OpenMP_FOUND)
+        set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    endif()
+else()  # WITH_OPENMP == OFF
+    find_package (Threads REQUIRED)
+    # Disable unknown #pragma omp warning
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unknown-pragmas")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+endif()
+
+#--------------------------------------------------------------------
+# Pthreads logic (only for Google benchmark)
+#--------------------------------------------------------------------
+# In order to have the Threads_FOUND on some Linux and macOS systems
+set(CMAKE_THREAD_LIBS_INIT "-lpthread")
+set(CMAKE_HAVE_THREADS_LIBRARY 1)
+set(CMAKE_USE_WIN32_THREADS_INIT 0)
+set(CMAKE_USE_PTHREADS_INIT 1)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+
+#--------------------------------------------------------------------
+# Submodule Update logic
+#--------------------------------------------------------------------
+if(GIT_SUBMOD_AUTO AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    # Update submodules as needed
+    find_package (Git REQUIRED)
+    message(STATUS "Submodule update")
+    if(NOT GIT_SUBMODULE_SYNCED)
+        # "git submodule sync --recursive" should run only once, when CMakeCache.txt doesn't exist'
+        execute_process(COMMAND ${GIT_EXECUTABLE} submodule sync --recursive
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        RESULT_VARIABLE GIT_SUBMODULE_RESULT)
+        if(NOT GIT_SUBMODULE_RESULT EQUAL "0")
+            message(FATAL_ERROR "\"git submodule sync --recursive\" failed with ${GIT_SUBMODULE_RESULT}, please checkout submodules")
+        endif()
+    endif()
+
+    execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    RESULT_VARIABLE GIT_SUBMODULE_RESULT)
+    if(NOT GIT_SUBMODULE_RESULT EQUAL "0")
+        if(NOT GIT_SUBMODULE_SYNCED)
+            # print this message only if update has never happened
+            message(FATAL_ERROR "\"git submodule update --init\" failed with ${GIT_SUBMODULE_RESULT}, please checkout submodules")
+        else()
+            message(SEND_ERROR "\"git submodule update --init\" failed with ${GIT_SUBMODULE_RESULT}, please checkout submodules or disable autoupdate with -DGIT_SUBMOD_AUTO=OFF")
+        endif()
+    endif()
+
+    if(NOT GIT_SUBMODULE_SYNCED)
+        set(GIT_SUBMODULE_SYNCED ON CACHE BOOL "" FORCE)
+    endif()
+endif()
+
+#--------------------------------------------------------------------
+# Coverage logic
+#--------------------------------------------------------------------
+if ( WITH_COVTEST )
+    find_program(LCOV_BIN lcov)
+    if (LCOV_BIN MATCHES "lcov$")
+        #Creates the command make cov
+        add_custom_target( cov
+            DEPENDS core_tests pke_tests binfhe_tests
+            COMMAND cd ${BUILDDIR} && mkdir -p coverage
+            COMMAND cd ${BUILDDIR}/src/core/CMakeFiles/core_tests.dir/unittest/ && gcov *.gcno && lcov --capture --directory . --output-file ${COVDIR}/core.info
+            COMMAND cd ${BUILDDIR}/src/pke/CMakeFiles/pke_tests.dir/unittest/ && gcov *.gcno && lcov --capture --directory . --output-file ${COVDIR}/pke.info
+            COMMAND cd ${BUILDDIR}/src/binfhe/CMakeFiles/binfhe_tests.dir/unittest/ && gcov  *.gcno && lcov --capture --directory . --output-file ${COVDIR}/binfhe.info
+            COMMAND cd ${COVDIR} && mkdir -p assets && genhtml -t "Coverage Test" -o ${COVDIR}/assets/ *.info
+        )
+        message(STATUS "lcov found in ${LCOV_BIN}")
+    else ()
+        message(STATUS "lcov needs to be installed to generate a coverage report")
+    endif ()
+endif()
+
+
+#--------------------------------------------------------------------
+# Third-party logic
+#--------------------------------------------------------------------
+include (ExternalProject)
+
+# third party directories
+set( THIRDPARTYDIR ${CMAKE_CURRENT_SOURCE_DIR}/third-party )
+include_directories( ${THIRDPARTYDIR}/include )
+
+### Handle third-party CEREAL
+include_directories( ${THIRDPARTYDIR}/cereal/include )
+install(DIRECTORY ${THIRDPARTYDIR}/cereal/include/ DESTINATION include/openfhe)
+
+include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/third-party/google-test/googletest )
+include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/third-party/google-test/googletest/include )
+include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/src/core/include )
+include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/src/binfhe/include )
+
+include_directories( ${CMAKE_CURRENT_BINARY_DIR}/src/core )
+
+### Handle third-party gperftools for optional tcmalloc
+
+add_custom_target(
+    tcm
+    COMMAND ./autogen.sh
+    COMMAND ./configure --prefix=${CMAKE_CURRENT_BINARY_DIR}/third-party --enable-minimal
+    COMMAND make
+    COMMAND make install
+    WORKING_DIRECTORY ${THIRDPARTYDIR}/gperftools
+)
+
+add_custom_target(
+    tcm_clean
+    COMMAND rm -rf include/gperftools include/google lib/libtcmalloc_minimal* lib/pkgconfig/libtcmalloc* lib/pkgconfig/libprofiler.pc share/doc/gperftools
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/third-party
+)
+
+if(BUILD_STATIC)
+add_library(tcmalloc_static STATIC IMPORTED GLOBAL)
+set_target_properties(tcmalloc_static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/third-party/lib/libtcmalloc_minimal${CMAKE_STATIC_LIBRARY_SUFFIX})
+endif()
+
+if(BUILD_SHARED)
+add_library(tcmalloc SHARED IMPORTED GLOBAL)
+set_target_properties(tcmalloc PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/third-party/lib/libtcmalloc_minimal${CMAKE_SHARED_LIBRARY_SUFFIX})
+endif()
+
+if(WITH_TCM)
+    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/third-party/lib DESTINATION .
+        FILES_MATCHING PATTERN "libtcmalloc_minimal.*")
+    list(APPEND THIRDPARTYLIBS "tcmalloc")
+    list(APPEND THIRDPARTYSTATICLIBS "tcmalloc_static")
+    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/third-party/include DESTINATION include/openfhe/third-party/)
+endif()
+
+if(WITH_NTL)
+    ### Find gmp and ntl libraries. They must be installed by the user
+    list(APPEND general_paths "/usr" "/usr/local" "/opt" "/opt/local")
+    list(APPEND header_suffixes "include" "include/NTL" "include/${CMAKE_LIBRARY_ARCHITECTURE}")
+    list(APPEND lib_suffixes "lib" "lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+    if (NOT(NTL_INCLUDE_DIR AND NTL_LIBRARIES))
+        find_path(NTL_INCLUDE_DIR
+            NAMES RR.h
+            PATHS ${general_paths}
+            PATH_SUFFIXES ${header_suffixes}
+        )
+        find_library(NTL_LIBRARIES
+            NAMES ntl libntl
+            ONLY_CMAKE_FIND_ROOT_PATH
+            PATHS ${general_paths}
+            PATH_SUFFIXES ${lib_suffixes}
+        )
+
+        include(FindPackageHandleStandardArgs)
+        FIND_PACKAGE_HANDLE_STANDARD_ARGS(NTL DEFAULT_MSG NTL_INCLUDE_DIR NTL_LIBRARIES)
+        if(NTL_FOUND)
+            get_filename_component(NTL_LIBRARIES ${NTL_LIBRARIES} DIRECTORY)
+        else()
+            message(FATAL_ERROR "** ERROR ** libntl is not found."
+                "In order to use MATHBACKEND 6, install libntl or pass -DNTL_INCLUDE_DIR=<dir> and -DNTL_LIBRARIES=<dir> to cmake")
+        endif()
+    endif()
+
+    if (NOT(GMP_INCLUDE_DIR AND GMP_LIBRARIES))
+        find_path(GMP_INCLUDE_DIR
+            NAMES gmp.h
+            PATHS ${general_paths}
+            PATH_SUFFIXES ${header_suffixes}
+        )
+        find_library(GMP_LIBRARIES
+            NAMES gmp libgmp
+            ONLY_CMAKE_FIND_ROOT_PATH
+            PATHS ${general_paths}
+            PATH_SUFFIXES ${lib_suffixes}
+        )
+
+        include(FindPackageHandleStandardArgs)
+        FIND_PACKAGE_HANDLE_STANDARD_ARGS(GMP DEFAULT_MSG GMP_INCLUDE_DIR GMP_LIBRARIES)
+        if(GMP_FOUND)
+            get_filename_component(GMP_LIBRARIES ${GMP_LIBRARIES} DIRECTORY)
+        else()
+            message(FATAL_ERROR "** ERROR ** libgmp is not found."
+                "In order to use MATHBACKEND 6, install libgmp or pass -DGMP_INCLUDE_DIR=<dir> and -GMPL_LIBRARIES=<dir> to cmake")
+        endif()
+    endif()
+    mark_as_advanced(NTL_INCLUDE_DIR NTL_LIBRARIES)
+    mark_as_advanced(GMP_INCLUDE_DIR GMP_LIBRARIES)
+    include_directories(${NTL_INCLUDE_DIR})
+    include_directories(${GMP_INCLUDE_DIR})
+    link_directories(${NTL_LIBRARIES})
+    link_directories(${GMP_LIBRARIES})
+
+    list(APPEND THIRDPARTYLIBS "ntl")
+    list(APPEND THIRDPARTYLIBS "gmp")
+    list(APPEND THIRDPARTYSTATICLIBS "ntl")
+    list(APPEND THIRDPARTYSTATICLIBS "gmp")
+endif()
+
+set(DEMODATAPATH ${CMAKE_CURRENT_SOURCE_DIR}/demoData)
+set(BINDEMODATAPATH ${CMAKE_CURRENT_BINARY_DIR}/demoData)
+
+# copies demoData folder from the root of the repo to build/demoData if the folder does not exist
+add_custom_target(third-party ALL
+    COMMAND [ ! -d ${BINDEMODATAPATH} ] && cp -R ${DEMODATAPATH} ${BINDEMODATAPATH} && echo "-- Copied demoData files" || echo "-- demoData folder already exists" )
+
+# when running "make clean", additionally deletes the demoData folder and CMake cache file
+set(ADDITIONAL_CLEAN_FILES "")
+LIST(APPEND ADDITIONAL_CLEAN_FILES ${BINDEMODATAPATH})
+LIST(APPEND ADDITIONAL_CLEAN_FILES ${CMAKE_CURRENT_BINARY_DIR}/CMakeCache.txt)
+
+## for tests
+if( BUILD_UNITTESTS )
+    set(UNITTESTMAIN ${PROJECT_SOURCE_DIR}/test/Main_TestAll.cpp)
+endif()
+
+### add each of the subdirs of src
+add_subdirectory(src/core)
+add_subdirectory(src/pke)
+add_subdirectory(src/binfhe)
+
+### build the google test handlers
+###if( BUILD_UNITTESTS )
+###	add_subdirectory(third-party/google-test EXCLUDE_FROM_ALL)
+###endif()
+
+### build the google benchmark handlers (just the parts we need)
+if ( BUILD_BENCHMARKS )
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Enable testing of the benchmark library." FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Enable installation of benchmark. (Projects embedding benchmark may want to turn this OFF.)" FORCE)
+    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "Enable building the unit tests which depend on gtest" FORCE)
+    add_subdirectory(third-party/google-benchmark EXCLUDE_FROM_ALL)
+    add_subdirectory(benchmark)
+endif()
+
+## clobber cleans AND deletes the third-party stuff
+add_custom_target( clobber COMMAND make clean WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} )
+
+if( BUILD_UNITTESTS )
+    add_custom_target( testall
+        DEPENDS core_tests pke_tests  binfhe_tests
+        COMMAND echo core: && unittest/core_tests -t || true
+        COMMAND echo pke: && unittest/pke_tests -t || true
+        COMMAND echo binfhe: && unittest/binfhe_tests -t )
+endif()
+
+if (BUILD_EXAMPLES)
+    add_custom_target( allexamples DEPENDS allcoreexamples allpkeexamples allbinfheexamples )
+endif()
+
+if (BUILD_EXTRAS)
+    add_custom_target( allextras DEPENDS allcoreextras allpkeextras )
+endif()
+
+add_custom_target( allmodules DEPENDS ${OpenFHE_PACKAGE_LIBS} )
+
+# Add the additional "make clean" files
+GET_DIRECTORY_PROPERTY(clean_files ADDITIONAL_MAKE_CLEAN_FILES)
+LIST(APPEND            clean_files ${ADDITIONAL_CLEAN_FILES})
+LIST(REMOVE_DUPLICATES clean_files)
+LIST(REMOVE_ITEM       clean_files "")
+SET_DIRECTORY_PROPERTIES(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${clean_files}")
+
+export(EXPORT OpenFHETargets FILE "${PROJECT_BINARY_DIR}/OpenFHETargets.cmake")
+
+export(PACKAGE OpenFHE)
+
+# Create the OpenFHEConfig.cmake and OpenFHEConfigVersion files
+file(RELATIVE_PATH REL_INCLUDE_DIR "${INSTALL_CMAKE_DIR}"
+   "${INSTALL_INCLUDE_DIR}")
+# ... for the build tree
+set(CONF_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}" "${PROJECT_BINARY_DIR}")
+configure_file(OpenFHEConfig.cmake.in
+  "${PROJECT_BINARY_DIR}/OpenFHEConfig.cmake" @ONLY)
+# ... for the install tree
+set(CONF_INCLUDE_DIRS "\${OpenFHE_CMAKE_DIR}/${REL_INCLUDE_DIR}")
+configure_file(OpenFHEConfig.cmake.in
+  "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenFHEConfig.cmake" @ONLY)
+# ... for both
+configure_file(OpenFHEConfigVersion.cmake.in
+  "${PROJECT_BINARY_DIR}/OpenFHEConfigVersion.cmake" @ONLY)
+
+# Install the OpenFHEConfig.cmake and OpenFHEConfigVersion.cmake
+install(FILES
+  "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/OpenFHEConfig.cmake"
+  "${PROJECT_BINARY_DIR}/OpenFHEConfigVersion.cmake"
+  DESTINATION "${INSTALL_CMAKE_DIR}" COMPONENT dev)
+
+# Install the export set for use with the install-tree
+install(EXPORT OpenFHETargets DESTINATION
+  "${INSTALL_CMAKE_DIR}" COMPONENT dev)
+
+
+//===== ./benchmark/CMakeLists.txt =====
+include_directories( ../src/core/include )
+include_directories( ../src/core/lib )
+include_directories( ../src/pke/include )
+include_directories( ../src/binfhe/include )
+
+set( REGEX_FLAG -DHAVE_STD_REGEX )
+
+if ( "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" )
+	set( WARNING_FLAG "" )
+else()
+	set( WARNING_FLAG -Wno-unused-but-set-variable )
+endif()
+
+if( BUILD_SHARED )
+	set (BMLIBS PUBLIC OPENFHEpke PUBLIC OPENFHEbinfhe PUBLIC OPENFHEcore ${THIRDPARTYLIBS} PUBLIC benchmark ${OpenMP_CXX_FLAGS})
+endif()
+
+if( BUILD_STATIC )
+	set (BMLIBS ${BMLIBS} PUBLIC OPENFHEpke_static PUBLIC OPENFHEbinfhe_static PUBLIC OPENFHEcore_static ${THIRDPARTYSTATICLIBS} PUBLIC benchmark ${OpenMP_CXX_FLAGS})
+endif()
+
+set (BMAPPS "")
+file (GLOB BMARK_SRC_FILES CONFIGURE_DEPENDS src/*.cpp)
+foreach (app ${BMARK_SRC_FILES})
+	get_filename_component ( exe ${app} NAME_WE )
+	add_executable ( ${exe} ${app} )
+	set_property(TARGET ${exe} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/benchmark)
+	target_include_directories( ${exe} PUBLIC ../third-party/google-benchmark/include )
+	set_target_properties( ${exe} PROPERTIES COMPILE_FLAGS
+		"${REGEX_FLAG} -DHAVE_STEADY_CLOCK -DNDEBUG ${WARNING_FLAG}" )
+	target_link_libraries ( ${exe} ${BMLIBS} ${ADDITIONAL_LIBS})
+	set (BMAPPS ${BMAPPS} ${exe})
+endforeach()
+
+add_custom_target( allbenchmark )
+add_dependencies( allbenchmark ${BMAPPS} )
+
+add_custom_command( OUTPUT benchmarkinfocmd COMMAND echo Builds benchmark lib and these apps: ${BMAPPS} )
+add_custom_target( benchmarkinfo DEPENDS benchmarkinfocmd )
+
+
+//===== ./lsh/CMakeLists.txt =====
+cmake_minimum_required(VERSION 3.5.1)
+
+project(LSH_OpenFHE_Tests CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# 设置构建类型
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+message(STATUS "Building in ${CMAKE_BUILD_TYPE} mode")
+
+#--------------------------------------------------------------------
+# 设置 OpenFHE 路径
+#--------------------------------------------------------------------
+set(OPENFHE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+# 验证 OpenFHE 根目录存在
+if(NOT EXISTS "${OPENFHE_ROOT}")
+    message(FATAL_ERROR "OpenFHE root directory not found: ${OPENFHE_ROOT}")
+endif()
+
+# 验证 OpenFHE 已经构建
+if(NOT EXISTS "${OPENFHE_ROOT}/build")
+    message(FATAL_ERROR "OpenFHE build directory not found. Please build OpenFHE first by running 'make' in ${OPENFHE_ROOT}")
+endif()
+
+if(NOT EXISTS "${OPENFHE_ROOT}/build/lib")
+    message(FATAL_ERROR "OpenFHE libraries not found. Please ensure OpenFHE is properly built.")
+endif()
+
+message(STATUS "OpenFHE root directory: ${OPENFHE_ROOT}")
+message(STATUS "OpenFHE build directory: ${OPENFHE_ROOT}/build")
+
+#--------------------------------------------------------------------
+# 查找 OpenFHE 库
+#--------------------------------------------------------------------
+# 首先尝试使用 find_package
+list(APPEND CMAKE_PREFIX_PATH "${OPENFHE_ROOT}/build")
+find_package(OpenFHE QUIET)
+
+if(OpenFHE_FOUND)
+    message(STATUS "Found OpenFHE package")
+    message(STATUS "OpenFHE Version: ${OpenFHE_VERSION}")
+    message(STATUS "OpenFHE include directories: ${OpenFHE_INCLUDE}")
+    message(STATUS "OpenFHE libraries: ${OpenFHE_SHARED_LIBRARIES}")
+else()
+    message(STATUS "OpenFHE package not found, using manual configuration")
+    
+    # 手动设置包含目录
+    include_directories(
+        ${OPENFHE_ROOT}/src/core/include
+        ${OPENFHE_ROOT}/src/pke/include
+        ${OPENFHE_ROOT}/src/binfhe/include
+        ${OPENFHE_ROOT}/third-party/include
+        ${OPENFHE_ROOT}/third-party/cereal/include
+        ${OPENFHE_ROOT}/build/src/core
+        ${OPENFHE_ROOT}/build/src/pke
+    )
+    
+    # 设置库目录
+    link_directories(${OPENFHE_ROOT}/build/lib)
+    
+    # 检测库文件并设置库名称
+    if(EXISTS "${OPENFHE_ROOT}/build/lib/libOPENFHEcore.so" OR EXISTS "${OPENFHE_ROOT}/build/lib/libOPENFHEcore.a")
+        set(OpenFHE_LIBRARIES OPENFHEcore OPENFHEpke OPENFHEbinfhe)
+        message(STATUS "Using library names: OPENFHEcore, OPENFHEpke, OPENFHEbinfhe")
+    elseif(EXISTS "${OPENFHE_ROOT}/build/lib/libopenfhe-core.so" OR EXISTS "${OPENFHE_ROOT}/build/lib/libopenfhe-core.a")
+        set(OpenFHE_LIBRARIES openfhe-core openfhe-pke openfhe-binfhe)
+        message(STATUS "Using library names: openfhe-core, openfhe-pke, openfhe-binfhe")
+    else()
+        # 列出实际存在的库文件
+        file(GLOB LIB_FILES "${OPENFHE_ROOT}/build/lib/lib*.so" "${OPENFHE_ROOT}/build/lib/lib*.a")
+        message(STATUS "Available library files:")
+        foreach(lib ${LIB_FILES})
+            message(STATUS "  ${lib}")
+        endforeach()
+        message(FATAL_ERROR "Cannot find OpenFHE libraries in ${OPENFHE_ROOT}/build/lib/")
+    endif()
+endif()
+
+#--------------------------------------------------------------------
+# 查找线程库
+#--------------------------------------------------------------------
+find_package(Threads REQUIRED)
+
+#--------------------------------------------------------------------
+# 自动检测并编译所有测试文件（包含子目录）
+#--------------------------------------------------------------------
+# 在当前目录和 test 子目录中查找 .cpp 文件
+file(GLOB TEST_SOURCES_CURRENT CONFIGURE_DEPENDS "*.cpp")
+file(GLOB TEST_SOURCES_TEST CONFIGURE_DEPENDS "test/*.cpp")
+
+# 合并所有测试源文件
+set(TEST_SOURCES ${TEST_SOURCES_CURRENT} ${TEST_SOURCES_TEST})
+
+if(NOT TEST_SOURCES)
+    message(WARNING "No .cpp files found in current directory or test/ subdirectory")
+else()
+    message(STATUS "Found test files:")
+    foreach(test_source ${TEST_SOURCES})
+        message(STATUS "  ${test_source}")
+    endforeach()
+endif()
+
+foreach(test_source ${TEST_SOURCES})
+    # 获取文件名（不含扩展名）作为可执行文件名
+    get_filename_component(test_name ${test_source} NAME_WE)
+    
+    # 创建可执行文件
+    add_executable(${test_name} ${test_source})
+    
+    # 设置输出目录
+    set_property(TARGET ${test_name} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+    
+    if(OpenFHE_FOUND)
+        # 使用 find_package 找到的配置
+        target_link_libraries(${test_name} ${OpenFHE_SHARED_LIBRARIES})
+        target_include_directories(${test_name} PRIVATE ${OpenFHE_INCLUDE})
+    else()
+        # 使用手动配置
+        target_link_libraries(${test_name} ${OpenFHE_LIBRARIES})
+    endif()
+    
+    # 链接线程库
+    target_link_libraries(${test_name} Threads::Threads)
+    
+    # 设置编译器标志
+    target_compile_options(${test_name} PRIVATE -Wall -Wextra -O3)
+    
+    message(STATUS "Added executable: ${test_name}")
+endforeach()
+
+# 创建一个总目标来编译所有测试
+if(TEST_SOURCES)
+    set(ALL_TEST_TARGETS "")
+    foreach(test_source ${TEST_SOURCES})
+        get_filename_component(test_name ${test_source} NAME_WE)
+        list(APPEND ALL_TEST_TARGETS ${test_name})
+    endforeach()
+    
+    add_custom_target(all_tests DEPENDS ${ALL_TEST_TARGETS})
+    message(STATUS "Created target 'all_tests' for all test executables")
+    message(STATUS "Usage:")
+    message(STATUS "  make <test_name>  - Build specific test")
+    message(STATUS "  make all_tests    - Build all tests")
+    message(STATUS "  make              - Build all tests")
+endif()
+
+#--------------------------------------------------------------------
+# 显示配置信息
+#--------------------------------------------------------------------
+message(STATUS "")
+message(STATUS "=== Build Configuration ===")
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "C++ standard: ${CMAKE_CXX_STANDARD}")
+message(STATUS "Output directory: ${CMAKE_BINARY_DIR}/bin")
+if(OpenFHE_FOUND)
+    message(STATUS "OpenFHE: Found via find_package")
+else()
+    message(STATUS "OpenFHE: Manual configuration")
+    message(STATUS "OpenFHE libraries: ${OpenFHE_LIBRARIES}")
+endif()
+message(STATUS "===========================")
+message(STATUS "")
+
+//===== ./PreLoad.cmake =====
+# if(WIN32)
+if($ENV{MSYSTEM} MATCHES "MINGW")
+    # message(WARNING "======================= Linking for MINGW")
+    set(CMAKE_GENERATOR "Unix Makefiles" CACHE INTERNAL "" FORCE)
+endif()
+
+
+//===== ./src/binfhe/CMakeLists.txt =====
+#
+# CMakeLists.txt for BINFHE library
+#
+
+# all files named *.cpp are compiled to form the library
+file (GLOB BINFHE_SRC_FILES CONFIGURE_DEPENDS lib/*.cpp)
+
+include_directories(${CORE_INCLUDE_DIRS})
+list(APPEND BINFHE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include")
+list(APPEND BINFHE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/lib")
+include_directories(${BINFHE_INCLUDE_DIRS})
+
+set(BINFHE_VERSION_MAJOR ${OPENFHE_VERSION_MAJOR})
+set(BINFHE_VERSION_MINOR ${OPENFHE_VERSION_MINOR})
+set(BINFHE_VERSION_PATCH ${OPENFHE_VERSION_PATCH})
+set(BINFHE_VERSION ${BINFHE_VERSION_MAJOR}.${BINFHE_VERSION_MINOR}.${BINFHE_VERSION_PATCH})
+
+add_library(binfheobj OBJECT ${BINFHE_SRC_FILES})
+set_property(TARGET binfheobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+
+if ( BUILD_SHARED )
+	add_dependencies(binfheobj OPENFHEcore)
+	add_library (OPENFHEbinfhe SHARED $<TARGET_OBJECTS:binfheobj>)
+	set_property(TARGET OPENFHEbinfhe PROPERTY VERSION ${BINFHE_VERSION})
+	set_property(TARGET OPENFHEbinfhe PROPERTY SOVERSION ${BINFHE_VERSION_MAJOR})
+	set_property(TARGET OPENFHEbinfhe PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+	install(TARGETS OPENFHEbinfhe
+		EXPORT OpenFHETargets
+		DESTINATION lib)
+endif()
+
+if( BUILD_STATIC )
+add_dependencies(binfheobj OPENFHEcore_static)
+	add_library (OPENFHEbinfhe_static STATIC $<TARGET_OBJECTS:binfheobj>)
+	set_property(TARGET OPENFHEbinfhe_static PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+	install(TARGETS OPENFHEbinfhe_static
+		EXPORT OpenFHETargets
+		DESTINATION lib)
+endif()
+
+install(DIRECTORY include/
+	DESTINATION include/openfhe/binfhe)
+
+add_custom_target( allbinfhe )
+
+if( BUILD_SHARED )
+set (BINFHELIBS PUBLIC OPENFHEbinfhe PUBLIC OPENFHEcore ${THIRDPARTYLIBS} ${OpenMP_CXX_FLAGS})
+	target_link_libraries (OPENFHEbinfhe PUBLIC OPENFHEcore ${THIRDPARTYLIBS} ${OpenMP_CXX_FLAGS} ${ADDITIONAL_LIBS})
+	add_dependencies( allbinfhe OPENFHEbinfhe  )
+endif()
+
+if( BUILD_STATIC )
+set (BINFHELIBS ${BINFHELIBS} PUBLIC OPENFHEbinfhe_static PUBLIC OPENFHEcore_static ${THIRDPARTYSTATICLIBS} ${OpenMP_CXX_FLAGS})
+	target_link_libraries (OPENFHEbinfhe_static PUBLIC OPENFHEcore_static ${THIRDPARTYSTATICLIBS} ${OpenMP_CXX_FLAGS} ${ADDITIONAL_LIBS})
+	add_dependencies( allbinfhe OPENFHEbinfhe_static )
+endif()
+
+if( BUILD_UNITTESTS )
+	file (GLOB BINFHE_TEST_SRC_FILES CONFIGURE_DEPENDS unittest/*.cpp)
+	add_executable (binfhe_tests ${BINFHE_TEST_SRC_FILES} ${UNITTESTMAIN})
+	set_property(TARGET binfhe_tests PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/unittest)
+	target_link_libraries ( binfhe_tests ${BINFHELIBS} ${ADDITIONAL_LIBS})
+	if (NOT ${WITH_OPENMP})
+		target_link_libraries ( binfhe_tests PRIVATE Threads::Threads)
+	endif()
+
+	add_dependencies( allbinfhe binfhe_tests )
+
+	add_custom_command( OUTPUT runbinfhetests WORKING_DIRECTORY ${CMAKE_BINARY_DIR} COMMAND ${CMAKE_BINARY_DIR}/unittest/binfhe_tests )
+	add_custom_target( testbinfhe DEPENDS binfhe_tests runbinfhetests )
+endif()
+
+set (BINFHEAPPS "")
+if( BUILD_EXAMPLES)
+	file (GLOB BINFHE_EXAMPLES_SRC_FILES CONFIGURE_DEPENDS examples/*.cpp)
+	foreach (app ${BINFHE_EXAMPLES_SRC_FILES})
+		get_filename_component ( exe ${app} NAME_WE )
+		add_executable ( ${exe} ${app} )
+		set_property(TARGET ${exe} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/examples/binfhe)
+		set( BINFHEAPPS ${BINFHEAPPS} ${exe} )
+		target_link_libraries ( ${exe} ${BINFHELIBS} ${ADDITIONAL_LIBS})
+	endforeach()
+
+	file (GLOB BINFHE_EXAMPLES_SRC_FILES CONFIGURE_DEPENDS examples/pke/*.cpp)
+	foreach (app ${BINFHE_EXAMPLES_SRC_FILES})
+		get_filename_component ( exe ${app} NAME_WE )
+		add_executable ( ${exe} ${app} )
+		set_property(TARGET ${exe} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/examples/binfhe/pke)
+		set( BINFHEAPPS ${BINFHEAPPS} ${exe} )
+		target_link_libraries ( ${exe} ${BINFHELIBS} ${ADDITIONAL_LIBS})
+	endforeach()
+
+	add_custom_target( allbinfheexamples )
+	add_dependencies( allbinfheexamples ${BINFHEAPPS} )
+	add_dependencies( allbinfhe allbinfheexamples)
+endif()
+
+add_custom_command( OUTPUT binfheinfocmd COMMAND echo Builds OPENFHEbinfhe and these apps: ${BINFHEAPPS} )
+add_custom_target( binfheinfo DEPENDS binfheinfocmd )
+
+# Collect compile definitions and pass them upward
+if ( BUILD_SHARED )
+	get_target_property(_compile_defs OPENFHEbinfhe COMPILE_DEFINITIONS)
+	set(_pal_binfhe_compile_defs ${_compile_defs} PARENT_SCOPE)
+endif()
+
+if( BUILD_STATIC )
+	get_target_property(_compile_defs_static OPENFHEbinfhe_static COMPILE_DEFINITIONS)
+	set(_pal_binfhe_compile_defs_static ${_compile_defs_static} PARENT_SCOPE)
+endif()
+
+
+//===== ./src/core/CMakeLists.txt =====
+#
+# CMakeLists.txt for CORE library
+#
+
+# all files named *.c or */cpp are compiled to form the library
+file (GLOB_RECURSE CORE_SRC_FILES CONFIGURE_DEPENDS lib/*.c lib/*.cpp lib/utils/*.cpp)
+
+list(APPEND CORE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include")
+list(APPEND CORE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/lib")
+include_directories(${CORE_INCLUDE_DIRS})
+set(CORE_INCLUDE_DIRS "${CORE_INCLUDE_DIRS}" CACHE INTERNAL "")
+
+
+set(CORE_VERSION_MAJOR ${OPENFHE_VERSION_MAJOR})
+set(CORE_VERSION_MINOR ${OPENFHE_VERSION_MINOR})
+set(CORE_VERSION_PATCH ${OPENFHE_VERSION_PATCH})
+set(CORE_VERSION ${CORE_VERSION_MAJOR}.${CORE_VERSION_MINOR}.${CORE_VERSION_PATCH})
+
+add_library(coreobj OBJECT ${CORE_SRC_FILES})
+add_dependencies(coreobj third-party)
+
+set_property(TARGET coreobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+
+if ( BUILD_SHARED )
+	add_library (OPENFHEcore SHARED $<TARGET_OBJECTS:coreobj>)
+	set_property(TARGET OPENFHEcore PROPERTY VERSION ${CORE_VERSION})
+	set_property(TARGET OPENFHEcore PROPERTY SOVERSION ${CORE_VERSION_MAJOR})
+	set_property(TARGET OPENFHEcore PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+	install(TARGETS OPENFHEcore
+		EXPORT OpenFHETargets
+		DESTINATION lib)
+endif()
+
+
+if( BUILD_STATIC )
+	add_library (OPENFHEcore_static STATIC $<TARGET_OBJECTS:coreobj>)
+	set_property(TARGET OPENFHEcore_static PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+	install(TARGETS OPENFHEcore_static
+		EXPORT OpenFHETargets
+		DESTINATION lib)
+endif()
+
+install(DIRECTORY include/
+	DESTINATION include/openfhe/core)
+
+add_custom_target( allcore )
+
+if( BUILD_SHARED )
+	set (CORELIBS PUBLIC OPENFHEcore ${THIRDPARTYLIBS} ${OpenMP_CXX_FLAGS})
+	target_link_libraries (OPENFHEcore ${THIRDPARTYLIBS} ${OpenMP_CXX_FLAGS} ${ADDITIONAL_LIBS})
+	add_dependencies( allcore OPENFHEcore)
+endif()
+
+if( BUILD_STATIC )
+	set (CORELIBS ${CORELIBS} PUBLIC OPENFHEcore_static ${THIRDPARTYSTATICLIBS} ${OpenMP_CXX_FLAGS})
+	target_link_libraries (OPENFHEcore_static ${THIRDPARTYSTATICLIBS} ${OpenMP_CXX_FLAGS} ${ADDITIONAL_LIBS})
+	add_dependencies( allcore OPENFHEcore_static)
+endif()
+
+if( BUILD_UNITTESTS )
+	if( "${NATIVE_SIZE}" EQUAL 32 )
+		message("**** core_tests are not linked for NATIVE_SIZE=32")
+	else()
+		file (GLOB CORE_TEST_SRC_FILES CONFIGURE_DEPENDS unittest/*.cpp)
+	endif()
+	set (CORE_TEST_SRC_FILES ${CORE_TEST_SRC_FILES})
+	add_executable( core_tests ${CORE_TEST_SRC_FILES} ${UNITTESTMAIN} )
+	set_property(TARGET core_tests PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/unittest)
+	target_link_libraries ( core_tests ${CORELIBS} ${ADDITIONAL_LIBS})
+	if (NOT ${WITH_OPENMP})
+		target_link_libraries ( core_tests PRIVATE Threads::Threads)
+	endif()
+
+	add_dependencies( allcore core_tests )
+
+	add_custom_command( OUTPUT runcoretests WORKING_DIRECTORY ${CMAKE_BINARY_DIR} COMMAND ${CMAKE_BINARY_DIR}/unittest/core_tests )
+	add_custom_target( testcore DEPENDS core_tests runcoretests )
+endif()
+
+set( COREAPPS "" )
+if ( BUILD_EXAMPLES )
+	file (GLOB CORE_EXAMPLES_SRC_FILES CONFIGURE_DEPENDS examples/*.cpp)
+	foreach (app ${CORE_EXAMPLES_SRC_FILES})
+		get_filename_component ( exe ${app} NAME_WE )
+		if (${exe} STREQUAL "parallel" AND NOT ${WITH_OPENMP})
+			message("Skipping ${exe} because WITH_OPENMP=OFF")
+			continue()
+		endif()
+		add_executable ( ${exe} ${app} )
+		set_property(TARGET ${exe} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/examples/core)
+		set( COREAPPS ${COREAPPS} ${exe} )
+		target_link_libraries ( ${exe} ${CORELIBS} ${ADDITIONAL_LIBS})
+	endforeach()
+
+	add_custom_target( allcoreexamples )
+	add_dependencies( allcoreexamples ${COREAPPS} )
+	add_dependencies( allcore allcoreexamples )
+endif()
+
+set( COREEXTRAS "" )
+if (BUILD_EXTRAS)
+	file (GLOB CORE_EXTRAS_SRC_FILES CONFIGURE_DEPENDS extras/*.cpp)
+	foreach (app ${CORE_EXTRAS_SRC_FILES})
+		get_filename_component ( exe ${app} NAME_WE )
+		add_executable ( ${exe} ${app} )
+		set_property(TARGET ${exe} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/extras/core)
+		set( COREEXTRAS ${COREEXTRAS} ${exe} )
+		target_link_libraries ( ${exe} ${CORELIBS} ${ADDITIONAL_LIBS})
+	endforeach()
+
+	add_custom_target( allcoreextras )
+	add_dependencies( allcoreextras ${COREEXTRAS} )
+	add_dependencies( allcore allcoreextras )
+endif()
+
+add_custom_command( OUTPUT coreinfocmd COMMAND echo Builds OPENFHEcore and these apps: ${COREAPPS} )
+add_custom_target( coreinfo DEPENDS coreinfocmd )
+
+# Collect compile definitions and pass them upward
+if ( BUILD_SHARED )
+	get_target_property(_compile_defs OPENFHEcore COMPILE_DEFINITIONS)
+	set(_pal_core_compile_defs ${_compile_defs} PARENT_SCOPE)
+endif()
+
+if( BUILD_STATIC )
+	get_target_property(_compile_defs_static OPENFHEcore_static COMPILE_DEFINITIONS)
+	set(_pal_core_compile_defs_static ${_compile_defs_static} PARENT_SCOPE)
+endif()
+
+
+//===== ./src/pke/CMakeLists.txt =====
+#
+# CMakeLists.txt for PKE library
+#
+
+# all files named *.cpp are compiled to form the library
+file (GLOB_RECURSE PKE_SRC_FILES CONFIGURE_DEPENDS lib/*.cpp)
+
+include_directories(${CORE_INCLUDE_DIRS})
+list(APPEND PKE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include")
+list(APPEND PKE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/lib")
+include_directories(${PKE_INCLUDE_DIRS})
+
+set(PKE_VERSION_MAJOR ${OPENFHE_VERSION_MAJOR})
+set(PKE_VERSION_MINOR ${OPENFHE_VERSION_MINOR})
+set(PKE_VERSION_PATCH ${OPENFHE_VERSION_PATCH})
+set(PKE_VERSION ${PKE_VERSION_MAJOR}.${PKE_VERSION_MINOR}.${PKE_VERSION_PATCH})
+
+add_library (pkeobj OBJECT ${PKE_SRC_FILES})
+set_property(TARGET pkeobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+
+if( BUILD_SHARED )
+	add_dependencies(pkeobj OPENFHEcore OPENFHEbinfhe)
+	add_library (OPENFHEpke SHARED $<TARGET_OBJECTS:pkeobj>)
+	set_property(TARGET OPENFHEpke PROPERTY VERSION ${PKE_VERSION})
+	set_property(TARGET OPENFHEpke PROPERTY SOVERSION ${PKE_VERSION_MAJOR})
+	set_property(TARGET OPENFHEpke PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+	install(TARGETS OPENFHEpke
+		EXPORT OpenFHETargets
+		DESTINATION lib)
+endif()
+
+if( BUILD_STATIC )
+	add_dependencies(pkeobj OPENFHEcore_static OPENFHEbinfhe_static)
+	add_library (OPENFHEpke_static STATIC $<TARGET_OBJECTS:pkeobj>)
+	set_property(TARGET OPENFHEpke_static PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+	install(TARGETS OPENFHEpke_static
+		EXPORT OpenFHETargets
+		DESTINATION lib)
+endif()
+
+install(DIRECTORY include/ DESTINATION include/openfhe/pke)
+install(DIRECTORY unittest/utils/ DESTINATION include/openfhe/pke/unittest/utils FILES_MATCHING PATTERN "*.h")
+
+add_custom_target( allpke )
+
+if( BUILD_SHARED )
+	set (PKELIBS PUBLIC OPENFHEpke PUBLIC OPENFHEcore PUBLIC OPENFHEbinfhe ${THIRDPARTYLIBS} ${OpenMP_CXX_FLAGS})
+	target_link_libraries (OPENFHEpke PUBLIC OPENFHEcore PUBLIC OPENFHEbinfhe ${THIRDPARTYLIBS} ${OpenMP_CXX_FLAGS} ${ADDITIONAL_LIBS})
+	add_dependencies( allpke OPENFHEpke)
+endif()
+
+if( BUILD_STATIC )
+	set (PKELIBS ${PKELIBS} PUBLIC OPENFHEpke_static PUBLIC OPENFHEcore_static PUBLIC OPENFHEbinfhe_static ${THIRDPARTYLIBS} ${OpenMP_CXX_FLAGS})
+	target_link_libraries (OPENFHEpke_static PUBLIC OPENFHEcore_static PUBLIC OPENFHEbinfhe_static ${THIRDPARTYSTATICLIBS} ${OpenMP_CXX_FLAGS} ${ADDITIONAL_LIBS})
+	add_dependencies( allpke OPENFHEpke_static)
+endif()
+
+if( BUILD_UNITTESTS )
+	if( "${NATIVE_SIZE}" EQUAL 32 )
+		message("**** pke_tests are not linked for NATIVE_SIZE=32")
+	else()
+		file (GLOB_RECURSE PKE_TEST_SRC_FILES CONFIGURE_DEPENDS unittest/*.cpp)
+	endif()
+	add_executable (pke_tests ${PKE_TEST_SRC_FILES} ${UNITTESTMAIN})
+	set_property(TARGET pke_tests PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/unittest)
+    target_include_directories(pke_tests PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/unittest")
+    target_include_directories(pke_tests PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/unittest/utils")
+	target_link_libraries ( pke_tests ${PKELIBS} ${ADDITIONAL_LIBS})
+	if (NOT ${WITH_OPENMP} )
+		target_link_libraries ( pke_tests PRIVATE Threads::Threads)
+	endif()
+	add_dependencies( allpke pke_tests )
+
+	add_custom_command( OUTPUT runpketests WORKING_DIRECTORY ${CMAKE_BINARY_DIR} COMMAND ${CMAKE_BINARY_DIR}/unittest/pke_tests )
+	add_custom_target( testpke DEPENDS pke_tests runpketests )
+endif()
+
+set(PKEAPPS "")
+if ( BUILD_EXAMPLES)
+	file (GLOB PKE_EXAMPLES_SRC_FILES CONFIGURE_DEPENDS examples/*.cpp)
+	foreach (app ${PKE_EXAMPLES_SRC_FILES})
+		get_filename_component ( exe ${app} NAME_WE )
+		add_executable ( ${exe} ${app} )
+		set_property(TARGET ${exe} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/examples/pke)
+		set( PKEAPPS ${PKEAPPS} ${exe} )
+		target_link_libraries ( ${exe} ${PKELIBS} ${ADDITIONAL_LIBS})
+	endforeach()
+
+	add_custom_target( allpkeexamples )
+	add_dependencies( allpkeexamples ${PKEAPPS} )
+	add_dependencies( allpke allpkeexamples )
+endif()
+
+set( PKEEXTRAS "" )
+if (BUILD_EXTRAS)
+	file (GLOB PKE_EXTRAS_SRC_FILES CONFIGURE_DEPENDS extras/*.cpp)
+	foreach (app ${PKE_EXTRAS_SRC_FILES})
+		get_filename_component ( exe ${app} NAME_WE )
+		add_executable (${exe} ${app} )
+		set_property(TARGET ${exe} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/extras/pke)
+		set( PKEEXTRAS ${PKEEXTRAS} ${exe} )
+		target_link_libraries ( ${exe} ${PKELIBS} ${ADDITIONAL_LIBS})
+	endforeach()
+
+	add_custom_target( allpkeextras )
+	add_dependencies( allpkeextras ${PKEEXTRAS} )
+	add_dependencies( allpke allpkeextras )
+endif()
+
+add_custom_command( OUTPUT pkeinfocmd COMMAND echo Builds OPENFHEpke and these apps: ${PKEAPPS} )
+add_custom_target( pkeinfo DEPENDS pkeinfocmd )
+
+# Collect compile definitions and pass them upward
+if ( BUILD_SHARED )
+	get_target_property(_compile_defs OPENFHEpke COMPILE_DEFINITIONS)
+	set(_pal_pke_compile_defs ${_compile_defs} PARENT_SCOPE)
+endif()
+
+if( BUILD_STATIC )
+	get_target_property(_compile_defs_static OPENFHEpke_static COMPILE_DEFINITIONS)
+	set(_pal_pke_compile_defs_static ${_compile_defs_static} PARENT_SCOPE)
+endif()
+
+
+//===== ./third-party/cereal/CMakeLists.txt =====
+cmake_minimum_required(VERSION 3.6...3.15)
+
+project(cereal LANGUAGES CXX VERSION 1.3.2)
+
+if(PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(CEREAL_MASTER_PROJECT ON)
+endif()
+
+
+if(APPLE)
+    option(SKIP_PORTABILITY_TEST "Skip portability (32 bit) tests" ON)
+endif()
+
+option(BUILD_DOC "Build documentation" ON)
+option(BUILD_SANDBOX "Build sandbox examples" ON)
+option(SKIP_PERFORMANCE_COMPARISON "Skip building performance sandbox comparison (requires boost)" OFF)
+
+# TODO: should not be needed! CK
+if(NOT CMAKE_VERSION VERSION_LESS 3.0) # installing cereal requires INTERFACE lib
+    option(JUST_INSTALL_CEREAL "Don't do anything besides installing the library" OFF)
+endif()
+
+
+set(CEREAL_THREAD_LIBS)
+if(UNIX)
+    option(THREAD_SAFE "Use mutexes to ensure thread safety" OFF)
+    if(THREAD_SAFE)
+        message(STATUS "Use mutexes")
+        add_definitions(-DCEREAL_THREAD_SAFE=1)
+        set(CEREAL_THREAD_LIBS pthread)
+    endif()
+endif()
+
+
+if(MSVC)
+    add_compile_options(/bigobj /W3 /WX)
+else()
+    add_compile_options(-Wall -Wextra -pedantic -Wshadow -Wold-style-cast)
+    option(WITH_WERROR "Compile with '-Werror' C++ compiler flag" ON)
+    if(WITH_WERROR)
+        add_compile_options(-Werror)
+    endif()
+
+    option(CLANG_USE_LIBCPP "Use libc++ for clang compilation" OFF)
+    if(APPLE OR CLANG_USE_LIBCPP)
+        message(STATUS "Use libc++")
+        add_compile_options(-stdlib=libc++)
+        # TODO: use add_link_options(-stdlib=libc++ -lc++abi") bud this needs cmake 3.13! CK
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
+    endif()
+
+    if(NOT DEFINED CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD STREQUAL "98")
+        set(CMAKE_CXX_STANDARD 11)
+    endif()
+
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
+
+
+add_library(cereal INTERFACE)
+add_library(cereal::cereal ALIAS cereal)
+target_include_directories(cereal INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+list(APPEND CEREAL_THREAD_LIBS cereal::cereal)
+
+if(NOT CMAKE_VERSION VERSION_LESS 3.8)
+    target_compile_features(cereal INTERFACE cxx_std_11)
+endif()
+
+
+option(CEREAL_INSTALL "Generate the install target" ${CEREAL_MASTER_PROJECT})
+if(CEREAL_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    install(TARGETS cereal EXPORT ${PROJECT_NAME}Targets)
+    install(DIRECTORY include/cereal DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+    set(configFile ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake)
+    set(versionFile ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake)
+    set(configInstallDestination ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME})
+
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
+        ${configFile}
+        INSTALL_DESTINATION ${configInstallDestination}
+    )
+    write_basic_package_version_file(
+        ${versionFile}
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(FILES ${configFile} ${versionFile} DESTINATION ${configInstallDestination})
+    install(
+        EXPORT ${PROJECT_NAME}Targets
+        NAMESPACE "cereal::"
+        DESTINATION ${configInstallDestination}
+    )
+endif()
+
+
+if(JUST_INSTALL_CEREAL)
+    return()
+endif()
+
+
+if(NOT SKIP_PERFORMANCE_COMPARISON)
+    # Boost serialization for performance sandbox
+    find_package(Boost REQUIRED COMPONENTS serialization)
+endif()
+
+
+option(BUILD_TESTS "Build tests" ${CEREAL_MASTER_PROJECT})
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(unittests)
+endif()
+
+
+if(BUILD_SANDBOX)
+    add_subdirectory(sandbox)
+endif()
+
+
+if(BUILD_DOC)
+    add_subdirectory(doc)
+endif()
+
+
+//===== ./third-party/cereal/doc/CMakeLists.txt =====
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/doxygen.in" "${CMAKE_CURRENT_BINARY_DIR}/doxygen.cfg" @ONLY)
+  add_custom_target(doc
+    COMMAND ${DOXYGEN_EXECUTABLE} "${CMAKE_CURRENT_BINARY_DIR}/doxygen.cfg"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
+    COMMENT "Generating API documentation with Doxygen" VERBATIM
+    )
+
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../scripts/updatedoc.in" "${CMAKE_CURRENT_BINARY_DIR}/updatedoc.sh" @ONLY)
+  add_custom_target(update-doc
+    COMMAND "${CMAKE_CURRENT_BINARY_DIR}/updatedoc.sh"
+    DEPENDS doc
+    COMMENT "Copying documentation to gh-pages branch" VERBATIM
+    )
+
+endif()
+
+
+//===== ./third-party/cereal/sandbox/CMakeLists.txt =====
+add_subdirectory(sandbox_shared_lib)
+
+add_executable(sandbox sandbox.cpp)
+target_link_libraries(sandbox ${CEREAL_THREAD_LIBS})
+
+add_executable(sandbox_json sandbox_json.cpp)
+target_link_libraries(sandbox_json ${CEREAL_THREAD_LIBS})
+
+add_executable(sandbox_rtti sandbox_rtti.cpp)
+target_link_libraries(sandbox_rtti ${CEREAL_THREAD_LIBS})
+
+add_executable(sandbox_vs sandbox_vs.cpp)
+target_link_libraries(sandbox_vs sandbox_vs_dll)
+
+if(Boost_FOUND AND NOT SKIP_PERFORMANCE_COMPARISON)
+  add_executable(performance performance.cpp)
+  if(MSVC)
+    set_target_properties(performance PROPERTIES COMPILE_DEFINITIONS "BOOST_SERIALIZATION_DYN_LINK")
+  endif()
+  target_include_directories(performance PUBLIC ${Boost_INCLUDE_DIRS})
+  target_link_libraries(performance ${CEREAL_THREAD_LIBS} ${Boost_LIBRARIES})
+endif()
+
+
+//===== ./third-party/cereal/sandbox/sandbox_shared_lib/CMakeLists.txt =====
+add_library(sandbox_vs_dll SHARED base.cpp derived.cpp)
+target_link_libraries(sandbox_vs_dll ${CEREAL_THREAD_LIBS})
+target_include_directories(sandbox_vs_dll PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+)
+
+
+//===== ./third-party/cereal/unittests/boost/CMakeLists.txt =====
+file(GLOB TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *.cpp)
+
+include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
+
+# Build all of the non-special tests
+foreach(TEST_SOURCE ${TESTS})
+  message(STATUS ${TEST_SOURCE})
+
+  string(REPLACE ".cpp" "" TEST_TARGET "${TEST_SOURCE}")
+  set(TEST_TARGET "test_${TEST_TARGET}")
+
+  add_executable(${TEST_TARGET} ${TEST_SOURCE})
+  target_link_libraries(${TEST_TARGET} ${CEREAL_THREAD_LIBS})
+  add_test(NAME "${TEST_TARGET}" COMMAND "${TEST_TARGET}")
+
+  # If we are on a 64-bit machine, create an extra 32-bit version of the test if portability testing is enabled
+  if((NOT MSVC) AND (${CMAKE_SIZEOF_VOID_P} EQUAL 8) AND (NOT SKIP_PORTABILITY_TEST))
+    add_executable(${TEST_TARGET}_32 ${TEST_SOURCE})
+    target_link_libraries(${TEST_TARGET}_32 ${CEREAL_THREAD_LIBS})
+    set_target_properties(${TEST_TARGET}_32 PROPERTIES
+      COMPILE_FLAGS "-m32" LINK_FLAGS "-m32")
+    add_test(NAME "${TEST_TARGET}_32" COMMAND "${TEST_TARGET}_32")
+  endif()
+
+endforeach()
+
+if(NOT MSVC)
+  # add tests to coverage
+  foreach(TEST_SOURCE ${TESTS})
+    string(REPLACE ".cpp" "" COVERAGE_TARGET "${TEST_SOURCE}")
+    set(COVERAGE_TARGET "coverage_${COVERAGE_TARGET}")
+
+    add_dependencies(coverage ${COVERAGE_TARGET})
+
+    add_executable(${COVERAGE_TARGET} EXCLUDE_FROM_ALL ${TEST_SOURCE})
+    set_target_properties(${COVERAGE_TARGET} PROPERTIES COMPILE_FLAGS "-coverage")
+    set_target_properties(${COVERAGE_TARGET} PROPERTIES LINK_FLAGS "-coverage")
+    set_target_properties(${COVERAGE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/coverage")
+    target_link_libraries(${COVERAGE_TARGET} ${CEREAL_THREAD_LIBS})
+  endforeach()
+endif()
+
+
+//===== ./third-party/cereal/unittests/cmake-config-module.cmake =====
+if(CMAKE_VERSION LESS 3.0)
+  message(FATAL_ERROR "Cereal can't be installed with CMake < 3.0")
+endif()
+
+get_filename_component(BINARY_DIR ${CMAKE_BINARY_DIR}/build ABSOLUTE)
+get_filename_component(INSTALL_DIR ${CMAKE_BINARY_DIR}/out ABSOLUTE)
+
+# cmake configure step for cereal
+file(MAKE_DIRECTORY ${BINARY_DIR}/cereal)
+execute_process(
+  COMMAND ${CMAKE_COMMAND}
+    -DJUST_INSTALL_CEREAL=1
+    -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/..
+  WORKING_DIRECTORY ${BINARY_DIR}/cereal
+  RESULT_VARIABLE result
+)
+if(result)
+  message(FATAL_ERROR "Cereal cmake configure-step failed")
+endif()
+
+# cmake install cereal
+execute_process(
+  COMMAND ${CMAKE_COMMAND}
+    --build ${BINARY_DIR}/cereal
+    --target install
+  RESULT_VARIABLE result
+)
+if(result)
+  message(FATAL_ERROR "Cereal cmake install-step failed")
+endif()
+
+# create test project sources
+file(WRITE ${BINARY_DIR}/test_source/CMakeLists.txt "
+  cmake_minimum_required(VERSION ${CMAKE_VERSION})
+  project(cereal-test-config-module)
+  if(NOT MSVC)
+      if(CMAKE_VERSION VERSION_LESS 3.1)
+          set(CMAKE_CXX_FLAGS \"-std=c++11 \${CMAKE_CXX_FLAGS}\")
+      else()
+          set(CMAKE_CXX_STANDARD 11)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+      endif()
+  endif()
+  find_package(cereal REQUIRED)
+  add_executable(cereal-test-config-module main.cpp)
+  target_link_libraries(cereal-test-config-module cereal::cereal)
+  enable_testing()
+  add_test(NAME test-cereal-test-config-module COMMAND cereal-test-config-module)
+")
+
+file(WRITE ${BINARY_DIR}/test_source/main.cpp "
+  #include <cereal/archives/binary.hpp>
+  #include <sstream>
+  #include <cstdlib>
+  struct MyData
+  {
+    int x = 0, y = 0, z = 0;
+    void set() { x = 1; y = 2; z = 3; }
+    bool is_set() const { return x == 1 && y == 2 && z == 3; }
+
+    // This method lets cereal know which data members to serialize
+    template<class Archive>
+    void serialize(Archive & archive)
+    {
+      archive( x, y, z ); // serialize things by passing them to the archive
+    }
+  };
+  int main()
+  {
+    std::stringstream ss; // any stream can be used
+
+    {
+      cereal::BinaryOutputArchive oarchive(ss); // Create an output archive
+
+      MyData m1, m2, m3;
+      m1.set();
+      m2.set();
+      m3.set();
+      oarchive(m1, m2, m3); // Write the data to the archive
+    }
+
+    {
+      cereal::BinaryInputArchive iarchive(ss); // Create an input archive
+
+      MyData m1, m2, m3;
+      iarchive(m1, m2, m3); // Read the data from the archive
+
+      return (m1.is_set() && m2.is_set() && m3.is_set())
+      ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+  }"
+)
+
+file(MAKE_DIRECTORY ${BINARY_DIR}/test)
+execute_process(
+  COMMAND ${CMAKE_COMMAND}
+    -DCMAKE_PREFIX_PATH=${INSTALL_DIR}
+    ${BINARY_DIR}/test_source
+  WORKING_DIRECTORY ${BINARY_DIR}/test
+  RESULT_VARIABLE result
+)
+if(result)
+  message(FATAL_ERROR "Test cmake configure-step failed")
+endif()
+
+# cmake install cereal
+execute_process(
+  COMMAND ${CMAKE_COMMAND}
+    --build ${BINARY_DIR}/test
+  RESULT_VARIABLE result
+)
+if(result)
+  message(FATAL_ERROR "Test cmake build-step failed")
+endif()
+
+execute_process(
+  COMMAND ${CMAKE_CTEST_COMMAND}
+  WORKING_DIRECTORY ${BINARY_DIR}/test
+  RESULT_VARIABLE result
+)
+
+if(result)
+  message(FATAL_ERROR "Test run failed")
+endif()
+
+
+//===== ./third-party/cereal/unittests/CMakeLists.txt =====
+file(GLOB TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *.cpp)
+
+# A semi-colon separated list of test sources that should not be automatically built with doctest
+set(SPECIAL_TESTS "portability_test.cpp")
+
+if(CMAKE_VERSION VERSION_LESS 2.8)
+  # Portability test uses the `TARGET_FILE_DIR` generator expression which is available from CMake 2.8.
+  set(SKIP_PORTABILITY_TEST ON)
+endif()
+
+if(NOT SKIP_PORTABILITY_TEST)
+  # Build the portability test only if we are on a 64-bit machine (void* is 8 bytes)
+  if((${CMAKE_SIZEOF_VOID_P} EQUAL 8))
+    if(NOT MSVC)
+      add_executable(portability_test32 portability_test.cpp)
+      target_link_libraries(portability_test32 ${CEREAL_THREAD_LIBS})
+      set_target_properties(portability_test32 PROPERTIES COMPILE_FLAGS "-m32")
+      set_target_properties(portability_test32 PROPERTIES LINK_FLAGS "-m32")
+    endif()
+
+    add_executable(portability_test64 portability_test.cpp)
+    target_link_libraries(portability_test64 ${CEREAL_THREAD_LIBS})
+
+    add_test(NAME portability_test
+            COMMAND ${CMAKE_COMMAND}
+              -DPORTABILITY_TEST_DIR=$<TARGET_FILE_DIR:portability_test64>
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_portability_test.cmake")
+
+  elseif(MSVC)
+    add_executable(portability_test32 portability_test.cpp)
+    target_link_libraries(portability_test32 cereal::cereal)
+  endif()
+endif()
+
+# Build all of the non-special tests
+foreach(TEST_SOURCE ${TESTS})
+
+  string(REPLACE ".cpp" "" TEST_TARGET "${TEST_SOURCE}")
+  set(TEST_TARGET "test_${TEST_TARGET}")
+
+  # Check to see if our target is listed in "SPECIAL_TESTS"
+  list(FIND SPECIAL_TESTS "${TEST_SOURCE}" IS_SPECIAL_TEST)
+
+  if(IS_SPECIAL_TEST EQUAL -1)
+
+    add_executable(${TEST_TARGET} ${TEST_SOURCE})
+    target_link_libraries(${TEST_TARGET} ${CEREAL_THREAD_LIBS})
+    add_test(NAME "${TEST_TARGET}" COMMAND "${TEST_TARGET}")
+
+    # If we are on a 64-bit machine, create an extra 32-bit version of the test if portability testing is enabled
+    if((NOT MSVC) AND (${CMAKE_SIZEOF_VOID_P} EQUAL 8) AND (NOT SKIP_PORTABILITY_TEST))
+      add_executable(${TEST_TARGET}_32 ${TEST_SOURCE})
+      set_target_properties(${TEST_TARGET}_32 PROPERTIES
+        COMPILE_FLAGS "-m32" LINK_FLAGS "-m32")
+      target_link_libraries(${TEST_TARGET}_32 ${CEREAL_THREAD_LIBS})
+      add_test(NAME "${TEST_TARGET}_32" COMMAND "${TEST_TARGET}_32")
+    endif()
+
+  endif()
+
+endforeach()
+
+# Add the valgrind target
+if(NOT MSVC)
+  add_custom_target(valgrind
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/run_valgrind.sh")
+
+  # Add the coverage target
+  add_custom_target(coverage)
+  add_custom_command(TARGET coverage
+    COMMAND "${CMAKE_SOURCE_DIR}/scripts/updatecoverage.sh" ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/coverage")
+
+  # add tests to coverage
+  foreach(TEST_SOURCE ${TESTS})
+    string(REPLACE ".cpp" "" COVERAGE_TARGET "${TEST_SOURCE}")
+    set(COVERAGE_TARGET "coverage_${COVERAGE_TARGET}")
+
+    # Check to see if our target is listed in "SPECIAL_TESTS"
+    list(FIND SPECIAL_TESTS "${TEST_SOURCE}" IS_SPECIAL_TEST)
+
+    if(IS_SPECIAL_TEST EQUAL -1)
+      add_dependencies(coverage ${COVERAGE_TARGET})
+
+      add_executable(${COVERAGE_TARGET} EXCLUDE_FROM_ALL ${TEST_SOURCE})
+      set_target_properties(${COVERAGE_TARGET} PROPERTIES COMPILE_FLAGS "-coverage")
+      set_target_properties(${COVERAGE_TARGET} PROPERTIES LINK_FLAGS "-coverage")
+      set_target_properties(${COVERAGE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/coverage")
+      target_link_libraries(${COVERAGE_TARGET} ${CEREAL_THREAD_LIBS})
+    endif()
+  endforeach()
+endif()
+
+if(CMAKE_CXX_STANDARD GREATER 14)
+  add_subdirectory(cpp17)
+endif()
+
+if(Boost_FOUND)
+  add_subdirectory(boost)
+endif()
+
+if(NOT CMAKE_VERSION VERSION_LESS 3.0)
+  add_test(NAME test_cmake_config_module COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake-config-module.cmake)
+endif()
+
+
+//===== ./third-party/cereal/unittests/cpp17/CMakeLists.txt =====
+file(GLOB TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *.cpp)
+
+# Build all of the non-special tests
+foreach(TEST_SOURCE ${TESTS})
+  message(STATUS ${TEST_SOURCE})
+
+  string(REPLACE ".cpp" "" TEST_TARGET "${TEST_SOURCE}")
+  set(TEST_TARGET "test_cpp17_${TEST_TARGET}")
+
+  add_executable(${TEST_TARGET} ${TEST_SOURCE})
+  target_link_libraries(${TEST_TARGET} ${CEREAL_THREAD_LIBS})
+  add_test(NAME "${TEST_TARGET}" COMMAND "${TEST_TARGET}")
+
+  # If we are on a 64-bit machine, create an extra 32-bit version of the test if portability testing is enabled
+  if((NOT MSVC) AND (${CMAKE_SIZEOF_VOID_P} EQUAL 8) AND (NOT SKIP_PORTABILITY_TEST))
+    add_executable(${TEST_TARGET}_32 ${TEST_SOURCE})
+    target_link_libraries(${TEST_TARGET}_32 ${CEREAL_THREAD_LIBS})
+    set_target_properties(${TEST_TARGET}_32 PROPERTIES
+      COMPILE_FLAGS "-m32" LINK_FLAGS "-m32")
+    add_test(NAME "${TEST_TARGET}_32" COMMAND "${TEST_TARGET}_32")
+  endif()
+
+endforeach()
+
+if(NOT MSVC)
+  # add tests to coverage
+  foreach(TEST_SOURCE ${TESTS})
+    string(REPLACE ".cpp" "" COVERAGE_TARGET "${TEST_SOURCE}")
+    set(COVERAGE_TARGET "coverage_cpp17_${COVERAGE_TARGET}")
+
+    add_dependencies(coverage ${COVERAGE_TARGET})
+
+    add_executable(${COVERAGE_TARGET} EXCLUDE_FROM_ALL ${TEST_SOURCE})
+    set_target_properties(${COVERAGE_TARGET} PROPERTIES COMPILE_FLAGS "-coverage")
+    set_target_properties(${COVERAGE_TARGET} PROPERTIES LINK_FLAGS "-coverage")
+    set_target_properties(${COVERAGE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/coverage")
+    target_link_libraries(${COVERAGE_TARGET} ${CEREAL_THREAD_LIBS})
+  endforeach()
+endif()
+
+
+//===== ./third-party/cereal/unittests/run_portability_test.cmake =====
+macro(EXEC_CMD_CHECK)
+  message("running ${ARGN}")
+  execute_process(COMMAND ${ARGN} RESULT_VARIABLE CMD_RESULT)
+  if(CMD_RESULT)
+    message(FATAL_ERROR "Error running ${ARGN}")
+  endif()
+endmacro()
+
+set(PORTABILITY_TEST_32 "${PORTABILITY_TEST_DIR}/portability_test32")
+set(PORTABILITY_TEST_64 "${PORTABILITY_TEST_DIR}/portability_test64")
+
+exec_cmd_check(${PORTABILITY_TEST_64} save 64)
+exec_cmd_check(${PORTABILITY_TEST_32} load 32)
+exec_cmd_check(${PORTABILITY_TEST_32} save 32)
+exec_cmd_check(${PORTABILITY_TEST_64} load 64)
+exec_cmd_check(${PORTABILITY_TEST_64} remove 64)
+
+
+//===== ./third-party/google-benchmark/cmake/AddCXXCompilerFlag.cmake =====
+# - Adds a compiler flag if it is supported by the compiler
+#
+# This function checks that the supplied compiler flag is supported and then
+# adds it to the corresponding compiler flags
+#
+#  add_cxx_compiler_flag(<FLAG> [<VARIANT>])
+#
+# - Example
+#
+# include(AddCXXCompilerFlag)
+# add_cxx_compiler_flag(-Wall)
+# add_cxx_compiler_flag(-no-strict-aliasing RELEASE)
+# Requires CMake 2.6+
+
+if(__add_cxx_compiler_flag)
+  return()
+endif()
+set(__add_cxx_compiler_flag INCLUDED)
+
+include(CheckCXXCompilerFlag)
+
+function(mangle_compiler_flag FLAG OUTPUT)
+  string(TOUPPER "HAVE_CXX_FLAG_${FLAG}" SANITIZED_FLAG)
+  string(REPLACE "+" "X" SANITIZED_FLAG ${SANITIZED_FLAG})
+  string(REGEX REPLACE "[^A-Za-z_0-9]" "_" SANITIZED_FLAG ${SANITIZED_FLAG})
+  string(REGEX REPLACE "_+" "_" SANITIZED_FLAG ${SANITIZED_FLAG})
+  set(${OUTPUT} "${SANITIZED_FLAG}" PARENT_SCOPE)
+endfunction(mangle_compiler_flag)
+
+function(add_cxx_compiler_flag FLAG)
+  mangle_compiler_flag("${FLAG}" MANGLED_FLAG)
+  set(OLD_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${FLAG}")
+  check_cxx_compiler_flag("${FLAG}" ${MANGLED_FLAG})
+  set(CMAKE_REQUIRED_FLAGS "${OLD_CMAKE_REQUIRED_FLAGS}")
+  if(${MANGLED_FLAG})
+    if(ARGC GREATER 1)
+      set(VARIANT ${ARGV1})
+      string(TOUPPER "_${VARIANT}" VARIANT)
+    else()
+      set(VARIANT "")
+    endif()
+    set(CMAKE_CXX_FLAGS${VARIANT} "${CMAKE_CXX_FLAGS${VARIANT}} ${BENCHMARK_CXX_FLAGS${VARIANT}} ${FLAG}" PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(add_required_cxx_compiler_flag FLAG)
+  mangle_compiler_flag("${FLAG}" MANGLED_FLAG)
+  set(OLD_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${FLAG}")
+  check_cxx_compiler_flag("${FLAG}" ${MANGLED_FLAG})
+  set(CMAKE_REQUIRED_FLAGS "${OLD_CMAKE_REQUIRED_FLAGS}")
+  if(${MANGLED_FLAG})
+    if(ARGC GREATER 1)
+      set(VARIANT ${ARGV1})
+      string(TOUPPER "_${VARIANT}" VARIANT)
+    else()
+      set(VARIANT "")
+    endif()
+    set(CMAKE_CXX_FLAGS${VARIANT} "${CMAKE_CXX_FLAGS${VARIANT}} ${FLAG}" PARENT_SCOPE)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${FLAG}" PARENT_SCOPE)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${FLAG}" PARENT_SCOPE)
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${FLAG}" PARENT_SCOPE)
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${FLAG}" PARENT_SCOPE)
+  else()
+    message(FATAL_ERROR "Required flag '${FLAG}' is not supported by the compiler")
+  endif()
+endfunction()
+
+function(check_cxx_warning_flag FLAG)
+  mangle_compiler_flag("${FLAG}" MANGLED_FLAG)
+  set(OLD_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+  # Add -Werror to ensure the compiler generates an error if the warning flag
+  # doesn't exist.
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -Werror ${FLAG}")
+  check_cxx_compiler_flag("${FLAG}" ${MANGLED_FLAG})
+  set(CMAKE_REQUIRED_FLAGS "${OLD_CMAKE_REQUIRED_FLAGS}")
+endfunction()
+
+
+//===== ./third-party/google-benchmark/cmake/CXXFeatureCheck.cmake =====
+# - Compile and run code to check for C++ features
+#
+# This functions compiles a source file under the `cmake` folder
+# and adds the corresponding `HAVE_[FILENAME]` flag to the CMake
+# environment
+#
+#  cxx_feature_check(<FLAG> [<VARIANT>])
+#
+# - Example
+#
+# include(CXXFeatureCheck)
+# cxx_feature_check(STD_REGEX)
+# Requires CMake 2.8.12+
+
+if(__cxx_feature_check)
+  return()
+endif()
+set(__cxx_feature_check INCLUDED)
+
+function(cxx_feature_check FILE)
+  string(TOLOWER ${FILE} FILE)
+  string(TOUPPER ${FILE} VAR)
+  string(TOUPPER "HAVE_${VAR}" FEATURE)
+  if (DEFINED HAVE_${VAR})
+    set(HAVE_${VAR} 1 PARENT_SCOPE)
+    add_definitions(-DHAVE_${VAR})
+    return()
+  endif()
+
+  if (ARGC GREATER 1)
+    message(STATUS "Enabling additional flags: ${ARGV1}")
+    list(APPEND BENCHMARK_CXX_LINKER_FLAGS ${ARGV1})
+  endif()
+
+  if (NOT DEFINED COMPILE_${FEATURE})
+    message(STATUS "Performing Test ${FEATURE}")
+    if(CMAKE_CROSSCOMPILING)
+      try_compile(COMPILE_${FEATURE}
+              ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/${FILE}.cpp
+              CMAKE_FLAGS ${BENCHMARK_CXX_LINKER_FLAGS}
+              LINK_LIBRARIES ${BENCHMARK_CXX_LIBRARIES})
+      if(COMPILE_${FEATURE})
+        message(WARNING
+              "If you see build failures due to cross compilation, try setting HAVE_${VAR} to 0")
+        set(RUN_${FEATURE} 0 CACHE INTERNAL "")
+      else()
+        set(RUN_${FEATURE} 1 CACHE INTERNAL "")
+      endif()
+    else()
+      message(STATUS "Performing Test ${FEATURE}")
+      try_run(RUN_${FEATURE} COMPILE_${FEATURE}
+              ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/${FILE}.cpp
+              CMAKE_FLAGS ${BENCHMARK_CXX_LINKER_FLAGS}
+              LINK_LIBRARIES ${BENCHMARK_CXX_LIBRARIES})
+    endif()
+  endif()
+
+  if(RUN_${FEATURE} EQUAL 0)
+    message(STATUS "Performing Test ${FEATURE} -- success")
+    set(HAVE_${VAR} 1 PARENT_SCOPE)
+    add_definitions(-DHAVE_${VAR})
+  else()
+    if(NOT COMPILE_${FEATURE})
+      message(STATUS "Performing Test ${FEATURE} -- failed to compile")
+    else()
+      message(STATUS "Performing Test ${FEATURE} -- compiled but failed to run")
+    endif()
+  endif()
+endfunction()
+
+
+//===== ./third-party/google-benchmark/cmake/GetGitVersion.cmake =====
+# - Returns a version string from Git tags
+#
+# This function inspects the annotated git tags for the project and returns a string
+# into a CMake variable
+#
+#  get_git_version(<var>)
+#
+# - Example
+#
+# include(GetGitVersion)
+# get_git_version(GIT_VERSION)
+#
+# Requires CMake 2.8.11+
+find_package(Git)
+
+if(__get_git_version)
+  return()
+endif()
+set(__get_git_version INCLUDED)
+
+function(get_git_version var)
+  if(GIT_EXECUTABLE)
+      execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=8
+          WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+          RESULT_VARIABLE status
+          OUTPUT_VARIABLE GIT_DESCRIBE_VERSION
+          ERROR_QUIET)
+      if(status)
+          set(GIT_DESCRIBE_VERSION "v0.0.0")
+      endif()
+      
+      string(STRIP ${GIT_DESCRIBE_VERSION} GIT_DESCRIBE_VERSION)
+      if(GIT_DESCRIBE_VERSION MATCHES v[^-]*-) 
+         string(REGEX REPLACE "v([^-]*)-([0-9]+)-.*" "\\1.\\2"  GIT_VERSION ${GIT_DESCRIBE_VERSION})
+      else()
+         string(REGEX REPLACE "v(.*)" "\\1" GIT_VERSION ${GIT_DESCRIBE_VERSION})
+      endif()
+
+      # Work out if the repository is dirty
+      execute_process(COMMAND ${GIT_EXECUTABLE} update-index -q --refresh
+          WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+          OUTPUT_QUIET
+          ERROR_QUIET)
+      execute_process(COMMAND ${GIT_EXECUTABLE} diff-index --name-only HEAD --
+          WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+          OUTPUT_VARIABLE GIT_DIFF_INDEX
+          ERROR_QUIET)
+      string(COMPARE NOTEQUAL "${GIT_DIFF_INDEX}" "" GIT_DIRTY)
+      if (${GIT_DIRTY})
+          set(GIT_DESCRIBE_VERSION "${GIT_DESCRIBE_VERSION}-dirty")
+      endif()
+      message(STATUS "git version: ${GIT_DESCRIBE_VERSION} normalized to ${GIT_VERSION}")
+  else()
+      set(GIT_VERSION "0.0.0")
+  endif()
+
+  set(${var} ${GIT_VERSION} PARENT_SCOPE)
+endfunction()
+
+
+//===== ./third-party/google-benchmark/cmake/GoogleTest.cmake =====
+# Download and unpack googletest at configure time
+set(GOOGLETEST_PREFIX "${benchmark_BINARY_DIR}/third_party/googletest")
+configure_file(${benchmark_SOURCE_DIR}/cmake/GoogleTest.cmake.in ${GOOGLETEST_PREFIX}/CMakeLists.txt @ONLY)
+
+set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/googletest" CACHE PATH "") # Mind the quotes
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
+  -DALLOW_DOWNLOADING_GOOGLETEST=${BENCHMARK_DOWNLOAD_DEPENDENCIES} -DGOOGLETEST_PATH:PATH=${GOOGLETEST_PATH} .
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${GOOGLETEST_PREFIX}
+)
+
+if(result)
+  message(FATAL_ERROR "CMake step for googletest failed: ${result}")
+endif()
+
+execute_process(
+  COMMAND ${CMAKE_COMMAND} --build .
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${GOOGLETEST_PREFIX}
+)
+
+if(result)
+  message(FATAL_ERROR "Build step for googletest failed: ${result}")
+endif()
+
+# Prevent overriding the parent project's compiler/linker
+# settings on Windows
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+
+include(${GOOGLETEST_PREFIX}/googletest-paths.cmake)
+
+# Add googletest directly to our build. This defines
+# the gtest and gtest_main targets.
+add_subdirectory(${GOOGLETEST_SOURCE_DIR}
+                 ${GOOGLETEST_BINARY_DIR}
+                 EXCLUDE_FROM_ALL)
+
+set_target_properties(gtest PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:gtest,INTERFACE_INCLUDE_DIRECTORIES>)
+set_target_properties(gtest_main PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:gtest_main,INTERFACE_INCLUDE_DIRECTORIES>)
+set_target_properties(gmock PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:gmock,INTERFACE_INCLUDE_DIRECTORIES>)
+set_target_properties(gmock_main PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:gmock_main,INTERFACE_INCLUDE_DIRECTORIES>)
+
+
+//===== ./third-party/google-benchmark/cmake/llvm-toolchain.cmake =====
+find_package(LLVMAr REQUIRED)
+set(CMAKE_AR "${LLVMAR_EXECUTABLE}" CACHE FILEPATH "" FORCE)
+
+find_package(LLVMNm REQUIRED)
+set(CMAKE_NM "${LLVMNM_EXECUTABLE}" CACHE FILEPATH "" FORCE)
+
+find_package(LLVMRanLib REQUIRED)
+set(CMAKE_RANLIB "${LLVMRANLIB_EXECUTABLE}" CACHE FILEPATH "" FORCE)
+
+
+//===== ./third-party/google-benchmark/cmake/Modules/FindLLVMAr.cmake =====
+include(FeatureSummary)
+
+find_program(LLVMAR_EXECUTABLE
+  NAMES llvm-ar
+  DOC "The llvm-ar executable"
+  )
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(LLVMAr
+  DEFAULT_MSG
+  LLVMAR_EXECUTABLE)
+
+SET_PACKAGE_PROPERTIES(LLVMAr PROPERTIES
+  URL https://llvm.org/docs/CommandGuide/llvm-ar.html
+  DESCRIPTION "create, modify, and extract from archives"
+)
+
+
+//===== ./third-party/google-benchmark/cmake/Modules/FindLLVMNm.cmake =====
+include(FeatureSummary)
+
+find_program(LLVMNM_EXECUTABLE
+  NAMES llvm-nm
+  DOC "The llvm-nm executable"
+  )
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(LLVMNm
+  DEFAULT_MSG
+  LLVMNM_EXECUTABLE)
+
+SET_PACKAGE_PROPERTIES(LLVMNm PROPERTIES
+  URL https://llvm.org/docs/CommandGuide/llvm-nm.html
+  DESCRIPTION "list LLVM bitcode and object file’s symbol table"
+)
+
+
+//===== ./third-party/google-benchmark/cmake/Modules/FindLLVMRanLib.cmake =====
+include(FeatureSummary)
+
+find_program(LLVMRANLIB_EXECUTABLE
+  NAMES llvm-ranlib
+  DOC "The llvm-ranlib executable"
+  )
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(LLVMRanLib
+  DEFAULT_MSG
+  LLVMRANLIB_EXECUTABLE)
+
+SET_PACKAGE_PROPERTIES(LLVMRanLib PROPERTIES
+  DESCRIPTION "generate index for LLVM archive"
+)
+
+
+//===== ./third-party/google-benchmark/cmake/Modules/FindPFM.cmake =====
+# If successful, the following variables will be defined:
+# HAVE_LIBPFM.
+# Set BENCHMARK_ENABLE_LIBPFM to 0 to disable, regardless of libpfm presence.
+include(CheckIncludeFile)
+include(CheckLibraryExists)
+enable_language(C)
+
+check_library_exists(libpfm.a pfm_initialize "" HAVE_LIBPFM_INITIALIZE)
+if(HAVE_LIBPFM_INITIALIZE)
+  check_include_file(perfmon/perf_event.h HAVE_PERFMON_PERF_EVENT_H)
+  check_include_file(perfmon/pfmlib.h HAVE_PERFMON_PFMLIB_H)
+  check_include_file(perfmon/pfmlib_perf_event.h HAVE_PERFMON_PFMLIB_PERF_EVENT_H)
+  if(HAVE_PERFMON_PERF_EVENT_H AND HAVE_PERFMON_PFMLIB_H AND HAVE_PERFMON_PFMLIB_PERF_EVENT_H)
+    message("Using Perf Counters.")
+    set(HAVE_LIBPFM 1)
+  endif()
+else()
+  message("Perf Counters support requested, but was unable to find libpfm.")
+endif()
+
+
+//===== ./third-party/google-benchmark/cmake/split_list.cmake =====
+macro(split_list listname)
+  string(REPLACE ";" " " ${listname} "${${listname}}")
+endmacro()
+
+
+//===== ./third-party/google-benchmark/CMakeLists.txt =====
+cmake_minimum_required (VERSION 3.5.1)
+
+foreach(p
+    CMP0048 # OK to clear PROJECT_VERSION on project()
+    CMP0054 # CMake 3.1
+    CMP0056 # export EXE_LINKER_FLAGS to try_run
+    CMP0057 # Support no if() IN_LIST operator
+    CMP0063 # Honor visibility properties for all targets
+    CMP0077 # Allow option() overrides in importing projects
+    )
+  if(POLICY ${p})
+    cmake_policy(SET ${p} NEW)
+  endif()
+endforeach()
+
+project (benchmark VERSION 1.5.4 LANGUAGES CXX)
+
+option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." ON)
+option(BENCHMARK_ENABLE_EXCEPTIONS "Enable the use of exceptions in the benchmark library." ON)
+option(BENCHMARK_ENABLE_LTO "Enable link time optimisation of the benchmark library." OFF)
+option(BENCHMARK_USE_LIBCXX "Build and test using libc++ as the standard library." OFF)
+if(NOT MSVC)
+  option(BENCHMARK_BUILD_32_BITS "Build a 32 bit version of the library." OFF)
+else()
+  set(BENCHMARK_BUILD_32_BITS OFF CACHE BOOL "Build a 32 bit version of the library - unsupported when using MSVC)" FORCE)
+endif()
+option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark. (Projects embedding benchmark may want to turn this OFF.)" ON)
+
+# Allow unmet dependencies to be met using CMake's ExternalProject mechanics, which
+# may require downloading the source code.
+option(BENCHMARK_DOWNLOAD_DEPENDENCIES "Allow the downloading and in-tree building of unmet dependencies" OFF)
+
+# This option can be used to disable building and running unit tests which depend on gtest
+# in cases where it is not possible to build or find a valid version of gtest.
+option(BENCHMARK_ENABLE_GTEST_TESTS "Enable building the unit tests which depend on gtest" ON)
+
+option(BENCHMARK_ENABLE_LIBPFM "Enable performance counters provided by libpfm" OFF)
+
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+if(MSVC)
+    # As of CMake 3.18, CMAKE_SYSTEM_PROCESSOR is not set properly for MSVC and
+    # cross-compilation (e.g. Host=x86_64, target=aarch64) requires using the
+    # undocumented, but working variable.
+    # See https://gitlab.kitware.com/cmake/cmake/-/issues/15170
+    set(CMAKE_SYSTEM_PROCESSOR ${MSVC_CXX_ARCHITECTURE_ID})
+    if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "ARM")
+      set(CMAKE_CROSSCOMPILING TRUE)
+    endif()
+endif()
+
+set(ENABLE_ASSEMBLY_TESTS_DEFAULT OFF)
+function(should_enable_assembly_tests)
+  if(CMAKE_BUILD_TYPE)
+    string(TOLOWER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE_LOWER)
+    if (${CMAKE_BUILD_TYPE_LOWER} MATCHES "coverage")
+      # FIXME: The --coverage flag needs to be removed when building assembly
+      # tests for this to work.
+      return()
+    endif()
+  endif()
+  if (MSVC)
+    return()
+  elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    return()
+  elseif(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    # FIXME: Make these work on 32 bit builds
+    return()
+  elseif(BENCHMARK_BUILD_32_BITS)
+     # FIXME: Make these work on 32 bit builds
+    return()
+  endif()
+  find_program(LLVM_FILECHECK_EXE FileCheck)
+  if (LLVM_FILECHECK_EXE)
+    set(LLVM_FILECHECK_EXE "${LLVM_FILECHECK_EXE}" CACHE PATH "llvm filecheck" FORCE)
+    message(STATUS "LLVM FileCheck Found: ${LLVM_FILECHECK_EXE}")
+  else()
+    message(STATUS "Failed to find LLVM FileCheck")
+    return()
+  endif()
+  set(ENABLE_ASSEMBLY_TESTS_DEFAULT ON PARENT_SCOPE)
+endfunction()
+should_enable_assembly_tests()
+
+# This option disables the building and running of the assembly verification tests
+option(BENCHMARK_ENABLE_ASSEMBLY_TESTS "Enable building and running the assembly tests"
+    ${ENABLE_ASSEMBLY_TESTS_DEFAULT})
+
+# Make sure we can import out CMake functions
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+
+# Read the git tags to determine the project version
+include(GetGitVersion)
+get_git_version(GIT_VERSION)
+
+# If no git version can be determined, use the version
+# from the project() command
+if ("${GIT_VERSION}" STREQUAL "0.0.0")
+  set(VERSION "${benchmark_VERSION}")
+else()
+  set(VERSION "${GIT_VERSION}")
+endif()
+# Tell the user what versions we are using
+message(STATUS "Version: ${VERSION}")
+
+# The version of the libraries
+set(GENERIC_LIB_VERSION ${VERSION})
+string(SUBSTRING ${VERSION} 0 1 GENERIC_LIB_SOVERSION)
+
+# Import our CMake modules
+include(CheckCXXCompilerFlag)
+include(AddCXXCompilerFlag)
+include(CXXFeatureCheck)
+
+if (BENCHMARK_BUILD_32_BITS)
+  add_required_cxx_compiler_flag(-m32)
+endif()
+
+if (MSVC)
+  # Turn compiler warnings up to 11
+  string(REGEX REPLACE "[-/]W[1-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
+  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+
+  if (NOT BENCHMARK_ENABLE_EXCEPTIONS)
+    add_cxx_compiler_flag(-EHs-)
+    add_cxx_compiler_flag(-EHa-)
+    add_definitions(-D_HAS_EXCEPTIONS=0)
+  endif()
+  # Link time optimisation
+  if (BENCHMARK_ENABLE_LTO)
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /GL")
+    set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /LTCG")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /LTCG")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
+
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} /GL")
+    string(REGEX REPLACE "[-/]INCREMENTAL" "/INCREMENTAL:NO" CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO}")
+    set(CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
+    string(REGEX REPLACE "[-/]INCREMENTAL" "/INCREMENTAL:NO" CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO}")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
+    string(REGEX REPLACE "[-/]INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}")
+    set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
+
+    set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} /GL")
+    set(CMAKE_STATIC_LINKER_FLAGS_MINSIZEREL "${CMAKE_STATIC_LINKER_FLAGS_MINSIZEREL} /LTCG")
+    set(CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL "${CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL} /LTCG")
+    set(CMAKE_EXE_LINKER_FLAGS_MINSIZEREL "${CMAKE_EXE_LINKER_FLAGS_MINSIZEREL} /LTCG")
+  endif()
+else()
+  # Try and enable C++11. Don't use C++14 because it doesn't work in some
+  # configurations.
+  add_cxx_compiler_flag(-std=c++11)
+  if (NOT HAVE_CXX_FLAG_STD_CXX11)
+    add_cxx_compiler_flag(-std=c++0x)
+  endif()
+
+  # Turn compiler warnings up to 11
+  add_cxx_compiler_flag(-Wall)
+  add_cxx_compiler_flag(-Wextra)
+  add_cxx_compiler_flag(-Wshadow)
+  add_cxx_compiler_flag(-Werror RELEASE)
+  add_cxx_compiler_flag(-Werror RELWITHDEBINFO)
+  add_cxx_compiler_flag(-Werror MINSIZEREL)
+  if (NOT BENCHMARK_ENABLE_TESTING)
+    # Disable warning when compiling tests as gtest does not use 'override'.
+    add_cxx_compiler_flag(-Wsuggest-override)
+  endif()
+  add_cxx_compiler_flag(-pedantic)
+  add_cxx_compiler_flag(-pedantic-errors)
+  add_cxx_compiler_flag(-Wshorten-64-to-32)
+  add_cxx_compiler_flag(-fstrict-aliasing)
+  # Disable warnings regarding deprecated parts of the library while building
+  # and testing those parts of the library.
+  add_cxx_compiler_flag(-Wno-deprecated-declarations)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+    # Intel silently ignores '-Wno-deprecated-declarations',
+    # warning no. 1786 must be explicitly disabled.
+    # See #631 for rationale.
+    add_cxx_compiler_flag(-wd1786)
+  endif()
+  # Disable deprecation warnings for release builds (when -Werror is enabled).
+  add_cxx_compiler_flag(-Wno-deprecated RELEASE)
+  add_cxx_compiler_flag(-Wno-deprecated RELWITHDEBINFO)
+  add_cxx_compiler_flag(-Wno-deprecated MINSIZEREL)
+  if (NOT BENCHMARK_ENABLE_EXCEPTIONS)
+    add_cxx_compiler_flag(-fno-exceptions)
+  endif()
+
+  if (HAVE_CXX_FLAG_FSTRICT_ALIASING)
+    if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "Intel") #ICC17u2: Many false positives for Wstrict-aliasing
+      add_cxx_compiler_flag(-Wstrict-aliasing)
+    endif()
+  endif()
+  # ICC17u2: overloaded virtual function "benchmark::Fixture::SetUp" is only partially overridden
+  # (because of deprecated overload)
+  add_cxx_compiler_flag(-wd654)
+  add_cxx_compiler_flag(-Wthread-safety)
+  if (HAVE_CXX_FLAG_WTHREAD_SAFETY)
+    cxx_feature_check(THREAD_SAFETY_ATTRIBUTES)
+  endif()
+
+  # On most UNIX like platforms g++ and clang++ define _GNU_SOURCE as a
+  # predefined macro, which turns on all of the wonderful libc extensions.
+  # However g++ doesn't do this in Cygwin so we have to define it ourselfs
+  # since we depend on GNU/POSIX/BSD extensions.
+  if (CYGWIN)
+    add_definitions(-D_GNU_SOURCE=1)
+  endif()
+
+  if (QNXNTO)
+    add_definitions(-D_QNX_SOURCE)
+  endif()
+
+  # Link time optimisation
+  if (BENCHMARK_ENABLE_LTO)
+    add_cxx_compiler_flag(-flto)
+    add_cxx_compiler_flag(-Wno-lto-type-mismatch)
+    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+      find_program(GCC_AR gcc-ar)
+      if (GCC_AR)
+        set(CMAKE_AR ${GCC_AR})
+      endif()
+      find_program(GCC_RANLIB gcc-ranlib)
+      if (GCC_RANLIB)
+        set(CMAKE_RANLIB ${GCC_RANLIB})
+      endif()
+    elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+      include(llvm-toolchain)
+    endif()
+  endif()
+
+  # Coverage build type
+  set(BENCHMARK_CXX_FLAGS_COVERAGE "${CMAKE_CXX_FLAGS_DEBUG}"
+    CACHE STRING "Flags used by the C++ compiler during coverage builds."
+    FORCE)
+  set(BENCHMARK_EXE_LINKER_FLAGS_COVERAGE "${CMAKE_EXE_LINKER_FLAGS_DEBUG}"
+    CACHE STRING "Flags used for linking binaries during coverage builds."
+    FORCE)
+  set(BENCHMARK_SHARED_LINKER_FLAGS_COVERAGE "${CMAKE_SHARED_LINKER_FLAGS_DEBUG}"
+    CACHE STRING "Flags used by the shared libraries linker during coverage builds."
+    FORCE)
+  mark_as_advanced(
+    BENCHMARK_CXX_FLAGS_COVERAGE
+    BENCHMARK_EXE_LINKER_FLAGS_COVERAGE
+    BENCHMARK_SHARED_LINKER_FLAGS_COVERAGE)
+  set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
+    "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel Coverage.")
+  add_cxx_compiler_flag(--coverage COVERAGE)
+endif()
+
+if (BENCHMARK_USE_LIBCXX)
+  if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    add_cxx_compiler_flag(-stdlib=libc++)
+  elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR
+          "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    add_cxx_compiler_flag(-nostdinc++)
+    message(WARNING "libc++ header path must be manually specified using CMAKE_CXX_FLAGS")
+    # Adding -nodefaultlibs directly to CMAKE_<TYPE>_LINKER_FLAGS will break
+    # configuration checks such as 'find_package(Threads)'
+    list(APPEND BENCHMARK_CXX_LINKER_FLAGS -nodefaultlibs)
+    # -lc++ cannot be added directly to CMAKE_<TYPE>_LINKER_FLAGS because
+    # linker flags appear before all linker inputs and -lc++ must appear after.
+    list(APPEND BENCHMARK_CXX_LIBRARIES c++)
+  else()
+    message(FATAL_ERROR "-DBENCHMARK_USE_LIBCXX:BOOL=ON is not supported for compiler")
+  endif()
+endif(BENCHMARK_USE_LIBCXX)
+
+set(EXTRA_CXX_FLAGS "")
+if (WIN32 AND "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  # Clang on Windows fails to compile the regex feature check under C++11
+  set(EXTRA_CXX_FLAGS "-DCMAKE_CXX_STANDARD=14")
+endif()
+
+# C++ feature checks
+# Determine the correct regular expression engine to use
+cxx_feature_check(STD_REGEX ${EXTRA_CXX_FLAGS})
+cxx_feature_check(GNU_POSIX_REGEX ${EXTRA_CXX_FLAGS})
+cxx_feature_check(POSIX_REGEX ${EXTRA_CXX_FLAGS})
+if(NOT HAVE_STD_REGEX AND NOT HAVE_GNU_POSIX_REGEX AND NOT HAVE_POSIX_REGEX)
+  message(FATAL_ERROR "Failed to determine the source files for the regular expression backend")
+endif()
+if (NOT BENCHMARK_ENABLE_EXCEPTIONS AND HAVE_STD_REGEX
+        AND NOT HAVE_GNU_POSIX_REGEX AND NOT HAVE_POSIX_REGEX)
+  message(WARNING "Using std::regex with exceptions disabled is not fully supported")
+endif()
+
+cxx_feature_check(STEADY_CLOCK)
+# Ensure we have pthreads
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
+if (BENCHMARK_ENABLE_LIBPFM)
+  find_package(PFM)
+endif()
+
+# Set up directories
+include_directories(${PROJECT_SOURCE_DIR}/include)
+
+# Build the targets
+add_subdirectory(src)
+
+if (BENCHMARK_ENABLE_TESTING)
+  enable_testing()
+  if (BENCHMARK_ENABLE_GTEST_TESTS AND
+      NOT (TARGET gtest AND TARGET gtest_main AND
+           TARGET gmock AND TARGET gmock_main))
+    include(GoogleTest)
+  endif()
+  add_subdirectory(test)
+endif()
+
+
+//===== ./third-party/google-benchmark/src/CMakeLists.txt =====
+# Allow the source files to find headers in src/
+include(GNUInstallDirs)
+include_directories(${PROJECT_SOURCE_DIR}/src)
+
+if (DEFINED BENCHMARK_CXX_LINKER_FLAGS)
+  list(APPEND CMAKE_SHARED_LINKER_FLAGS ${BENCHMARK_CXX_LINKER_FLAGS})
+  list(APPEND CMAKE_MODULE_LINKER_FLAGS ${BENCHMARK_CXX_LINKER_FLAGS})
+endif()
+
+file(GLOB
+  SOURCE_FILES
+    *.cc
+    ${PROJECT_SOURCE_DIR}/include/benchmark/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
+file(GLOB BENCHMARK_MAIN "benchmark_main.cc")
+foreach(item ${BENCHMARK_MAIN})
+  list(REMOVE_ITEM SOURCE_FILES "${item}")
+endforeach()
+
+add_library(benchmark ${SOURCE_FILES})
+add_library(benchmark::benchmark ALIAS benchmark)
+set_target_properties(benchmark PROPERTIES
+  OUTPUT_NAME "benchmark"
+  VERSION ${GENERIC_LIB_VERSION}
+  SOVERSION ${GENERIC_LIB_SOVERSION}
+)
+target_include_directories(benchmark PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    )
+
+# libpfm, if available
+if (HAVE_LIBPFM)
+  target_link_libraries(benchmark libpfm.a)
+  add_definitions(-DHAVE_LIBPFM)
+endif()
+
+# Link threads.
+target_link_libraries(benchmark  ${BENCHMARK_CXX_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+find_library(LIBRT rt)
+if(LIBRT)
+  target_link_libraries(benchmark ${LIBRT})
+endif()
+
+if(CMAKE_BUILD_TYPE)
+  string(TOUPPER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE_UPPER)
+endif()
+if(NOT CMAKE_THREAD_LIBS_INIT AND "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE_UPPER}}" MATCHES ".*-fsanitize=[^ ]*address.*")
+  message(WARNING "CMake's FindThreads.cmake did not fail, but CMAKE_THREAD_LIBS_INIT ended up being empty. This was fixed in https://github.com/Kitware/CMake/commit/d53317130e84898c5328c237186dbd995aaf1c12 Let's guess that -pthread is sufficient.")
+  target_link_libraries(benchmark -pthread)
+endif()
+
+# We need extra libraries on Windows
+if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+  target_link_libraries(benchmark shlwapi)
+endif()
+
+# We need extra libraries on Solaris
+if(${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
+  target_link_libraries(benchmark kstat)
+endif()
+
+# Benchmark main library
+add_library(benchmark_main "benchmark_main.cc")
+add_library(benchmark::benchmark_main ALIAS benchmark_main)
+set_target_properties(benchmark_main PROPERTIES
+  OUTPUT_NAME "benchmark_main"
+  VERSION ${GENERIC_LIB_VERSION}
+  SOVERSION ${GENERIC_LIB_SOVERSION}
+)
+target_include_directories(benchmark PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    )
+target_link_libraries(benchmark_main benchmark::benchmark)
+
+
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+set(version_config "${generated_dir}/${PROJECT_NAME}ConfigVersion.cmake")
+set(project_config "${generated_dir}/${PROJECT_NAME}Config.cmake")
+set(pkg_config "${generated_dir}/${PROJECT_NAME}.pc")
+set(targets_export_name "${PROJECT_NAME}Targets")
+
+set(namespace "${PROJECT_NAME}::")
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+  "${version_config}" VERSION ${GENERIC_LIB_VERSION} COMPATIBILITY SameMajorVersion
+)
+
+configure_file("${PROJECT_SOURCE_DIR}/cmake/Config.cmake.in" "${project_config}" @ONLY)
+configure_file("${PROJECT_SOURCE_DIR}/cmake/benchmark.pc.in" "${pkg_config}" @ONLY)
+
+if (BENCHMARK_ENABLE_INSTALL)
+  # Install target (will install the library to specified CMAKE_INSTALL_PREFIX variable)
+  install(
+    TARGETS benchmark benchmark_main
+    EXPORT ${targets_export_name}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+  install(
+    DIRECTORY "${PROJECT_SOURCE_DIR}/include/benchmark"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.*h")
+
+  install(
+      FILES "${project_config}" "${version_config}"
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+
+  install(
+      FILES "${pkg_config}"
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+
+  install(
+      EXPORT "${targets_export_name}"
+      NAMESPACE "${namespace}"
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+endif()
+
+
+//===== ./third-party/google-benchmark/test/AssemblyTests.cmake =====
+
+include(split_list)
+
+set(ASM_TEST_FLAGS "")
+check_cxx_compiler_flag(-O3 BENCHMARK_HAS_O3_FLAG)
+if (BENCHMARK_HAS_O3_FLAG)
+  list(APPEND ASM_TEST_FLAGS -O3)
+endif()
+
+check_cxx_compiler_flag(-g0 BENCHMARK_HAS_G0_FLAG)
+if (BENCHMARK_HAS_G0_FLAG)
+  list(APPEND ASM_TEST_FLAGS -g0)
+endif()
+
+check_cxx_compiler_flag(-fno-stack-protector BENCHMARK_HAS_FNO_STACK_PROTECTOR_FLAG)
+if (BENCHMARK_HAS_FNO_STACK_PROTECTOR_FLAG)
+  list(APPEND ASM_TEST_FLAGS -fno-stack-protector)
+endif()
+
+split_list(ASM_TEST_FLAGS)
+string(TOUPPER "${CMAKE_CXX_COMPILER_ID}" ASM_TEST_COMPILER)
+
+macro(add_filecheck_test name)
+  cmake_parse_arguments(ARG "" "" "CHECK_PREFIXES" ${ARGV})
+  add_library(${name} OBJECT ${name}.cc)
+  set_target_properties(${name} PROPERTIES COMPILE_FLAGS "-S ${ASM_TEST_FLAGS}")
+  set(ASM_OUTPUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/${name}.s")
+  add_custom_target(copy_${name} ALL
+      COMMAND ${PROJECT_SOURCE_DIR}/tools/strip_asm.py
+        $<TARGET_OBJECTS:${name}>
+        ${ASM_OUTPUT_FILE}
+      BYPRODUCTS ${ASM_OUTPUT_FILE})
+  add_dependencies(copy_${name} ${name})
+  if (NOT ARG_CHECK_PREFIXES)
+    set(ARG_CHECK_PREFIXES "CHECK")
+  endif()
+  foreach(prefix ${ARG_CHECK_PREFIXES})
+    add_test(NAME run_${name}_${prefix}
+        COMMAND
+          ${LLVM_FILECHECK_EXE} ${name}.cc
+          --input-file=${ASM_OUTPUT_FILE}
+          --check-prefixes=CHECK,CHECK-${ASM_TEST_COMPILER}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endforeach()
+endmacro()
+
+
+
+//===== ./third-party/google-benchmark/test/CMakeLists.txt =====
+# Enable the tests
+
+find_package(Threads REQUIRED)
+include(CheckCXXCompilerFlag)
+
+# NOTE: Some tests use `<cassert>` to perform the test. Therefore we must
+# strip -DNDEBUG from the default CMake flags in DEBUG mode.
+string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
+if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
+  add_definitions( -UNDEBUG )
+  add_definitions(-DTEST_BENCHMARK_LIBRARY_HAS_NO_ASSERTIONS)
+  # Also remove /D NDEBUG to avoid MSVC warnings about conflicting defines.
+  foreach (flags_var_to_scrub
+      CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_RELWITHDEBINFO
+      CMAKE_CXX_FLAGS_MINSIZEREL
+      CMAKE_C_FLAGS_RELEASE
+      CMAKE_C_FLAGS_RELWITHDEBINFO
+      CMAKE_C_FLAGS_MINSIZEREL)
+    string (REGEX REPLACE "(^| )[/-]D *NDEBUG($| )" " "
+      "${flags_var_to_scrub}" "${${flags_var_to_scrub}}")
+  endforeach()
+endif()
+
+check_cxx_compiler_flag(-O3 BENCHMARK_HAS_O3_FLAG)
+set(BENCHMARK_O3_FLAG "")
+if (BENCHMARK_HAS_O3_FLAG)
+  set(BENCHMARK_O3_FLAG "-O3")
+endif()
+
+# NOTE: These flags must be added after find_package(Threads REQUIRED) otherwise
+# they will break the configuration check.
+if (DEFINED BENCHMARK_CXX_LINKER_FLAGS)
+  list(APPEND CMAKE_EXE_LINKER_FLAGS ${BENCHMARK_CXX_LINKER_FLAGS})
+endif()
+
+add_library(output_test_helper STATIC output_test_helper.cc output_test.h)
+
+macro(compile_benchmark_test name)
+  add_executable(${name} "${name}.cc")
+  target_link_libraries(${name} benchmark::benchmark ${CMAKE_THREAD_LIBS_INIT})
+endmacro(compile_benchmark_test)
+
+macro(compile_benchmark_test_with_main name)
+  add_executable(${name} "${name}.cc")
+  target_link_libraries(${name} benchmark::benchmark_main)
+endmacro(compile_benchmark_test_with_main)
+
+macro(compile_output_test name)
+  add_executable(${name} "${name}.cc" output_test.h)
+  target_link_libraries(${name} output_test_helper benchmark::benchmark
+          ${BENCHMARK_CXX_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+endmacro(compile_output_test)
+
+# Demonstration executable
+compile_benchmark_test(benchmark_test)
+add_test(NAME benchmark COMMAND benchmark_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(filter_test)
+macro(add_filter_test name filter expect)
+  add_test(NAME ${name} COMMAND filter_test --benchmark_min_time=0.01 --benchmark_filter=${filter} ${expect})
+  add_test(NAME ${name}_list_only COMMAND filter_test --benchmark_list_tests --benchmark_filter=${filter} ${expect})
+endmacro(add_filter_test)
+
+add_filter_test(filter_simple "Foo" 3)
+add_filter_test(filter_simple_negative "-Foo" 2)
+add_filter_test(filter_suffix "BM_.*" 4)
+add_filter_test(filter_suffix_negative "-BM_.*" 1)
+add_filter_test(filter_regex_all ".*" 5)
+add_filter_test(filter_regex_all_negative "-.*" 0)
+add_filter_test(filter_regex_blank "" 5)
+add_filter_test(filter_regex_blank_negative "-" 0)
+add_filter_test(filter_regex_none "monkey" 0)
+add_filter_test(filter_regex_none_negative "-monkey" 5)
+add_filter_test(filter_regex_wildcard ".*Foo.*" 3)
+add_filter_test(filter_regex_wildcard_negative "-.*Foo.*" 2)
+add_filter_test(filter_regex_begin "^BM_.*" 4)
+add_filter_test(filter_regex_begin_negative "-^BM_.*" 1)
+add_filter_test(filter_regex_begin2 "^N" 1)
+add_filter_test(filter_regex_begin2_negative "-^N" 4)
+add_filter_test(filter_regex_end ".*Ba$" 1)
+add_filter_test(filter_regex_end_negative "-.*Ba$" 4)
+
+compile_benchmark_test(options_test)
+add_test(NAME options_benchmarks COMMAND options_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(basic_test)
+add_test(NAME basic_benchmark COMMAND basic_test --benchmark_min_time=0.01)
+
+compile_output_test(repetitions_test)
+add_test(NAME repetitions_benchmark COMMAND repetitions_test --benchmark_min_time=0.01 --benchmark_repetitions=3)
+
+compile_benchmark_test(diagnostics_test)
+add_test(NAME diagnostics_test COMMAND diagnostics_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(skip_with_error_test)
+add_test(NAME skip_with_error_test COMMAND skip_with_error_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(donotoptimize_test)
+# Some of the issues with DoNotOptimize only occur when optimization is enabled
+check_cxx_compiler_flag(-O3 BENCHMARK_HAS_O3_FLAG)
+if (BENCHMARK_HAS_O3_FLAG)
+  set_target_properties(donotoptimize_test PROPERTIES COMPILE_FLAGS "-O3")
+endif()
+add_test(NAME donotoptimize_test COMMAND donotoptimize_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(fixture_test)
+add_test(NAME fixture_test COMMAND fixture_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(register_benchmark_test)
+add_test(NAME register_benchmark_test COMMAND register_benchmark_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(map_test)
+add_test(NAME map_test COMMAND map_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(multiple_ranges_test)
+add_test(NAME multiple_ranges_test COMMAND multiple_ranges_test --benchmark_min_time=0.01)
+
+compile_benchmark_test(args_product_test)
+add_test(NAME args_product_test COMMAND args_product_test --benchmark_min_time=0.01)
+
+compile_benchmark_test_with_main(link_main_test)
+add_test(NAME link_main_test COMMAND link_main_test --benchmark_min_time=0.01)
+
+compile_output_test(reporter_output_test)
+add_test(NAME reporter_output_test COMMAND reporter_output_test --benchmark_min_time=0.01)
+
+compile_output_test(templated_fixture_test)
+add_test(NAME templated_fixture_test COMMAND templated_fixture_test --benchmark_min_time=0.01)
+
+compile_output_test(user_counters_test)
+add_test(NAME user_counters_test COMMAND user_counters_test --benchmark_min_time=0.01)
+
+compile_output_test(perf_counters_test)
+add_test(NAME perf_counters_test COMMAND perf_counters_test --benchmark_min_time=0.01 --benchmark_perf_counters=CYCLES,BRANCHES)
+
+compile_output_test(internal_threading_test)
+add_test(NAME internal_threading_test COMMAND internal_threading_test --benchmark_min_time=0.01)
+
+compile_output_test(report_aggregates_only_test)
+add_test(NAME report_aggregates_only_test COMMAND report_aggregates_only_test --benchmark_min_time=0.01)
+
+compile_output_test(display_aggregates_only_test)
+add_test(NAME display_aggregates_only_test COMMAND display_aggregates_only_test --benchmark_min_time=0.01)
+
+compile_output_test(user_counters_tabular_test)
+add_test(NAME user_counters_tabular_test COMMAND user_counters_tabular_test --benchmark_counters_tabular=true --benchmark_min_time=0.01)
+
+compile_output_test(user_counters_thousands_test)
+add_test(NAME user_counters_thousands_test COMMAND user_counters_thousands_test --benchmark_min_time=0.01)
+
+compile_output_test(memory_manager_test)
+add_test(NAME memory_manager_test COMMAND memory_manager_test --benchmark_min_time=0.01)
+
+check_cxx_compiler_flag(-std=c++03 BENCHMARK_HAS_CXX03_FLAG)
+if (BENCHMARK_HAS_CXX03_FLAG)
+  compile_benchmark_test(cxx03_test)
+  set_target_properties(cxx03_test
+      PROPERTIES
+      CXX_STANDARD 98
+      CXX_STANDARD_REQUIRED YES)
+  # libstdc++ provides different definitions within <map> between dialects. When
+  # LTO is enabled and -Werror is specified GCC diagnoses this ODR violation
+  # causing the test to fail to compile. To prevent this we explicitly disable
+  # the warning.
+  check_cxx_compiler_flag(-Wno-odr BENCHMARK_HAS_WNO_ODR)
+  if (BENCHMARK_ENABLE_LTO AND BENCHMARK_HAS_WNO_ODR)
+    set_target_properties(cxx03_test
+        PROPERTIES
+        LINK_FLAGS "-Wno-odr")
+  endif()
+  add_test(NAME cxx03 COMMAND cxx03_test --benchmark_min_time=0.01)
+endif()
+
+# Attempt to work around flaky test failures when running on Appveyor servers.
+if (DEFINED ENV{APPVEYOR})
+  set(COMPLEXITY_MIN_TIME "0.5")
+else()
+  set(COMPLEXITY_MIN_TIME "0.01")
+endif()
+compile_output_test(complexity_test)
+add_test(NAME complexity_benchmark COMMAND complexity_test --benchmark_min_time=${COMPLEXITY_MIN_TIME})
+
+###############################################################################
+# GoogleTest Unit Tests
+###############################################################################
+
+if (BENCHMARK_ENABLE_GTEST_TESTS)
+  macro(compile_gtest name)
+    add_executable(${name} "${name}.cc")
+    target_link_libraries(${name} benchmark::benchmark
+        gmock_main ${CMAKE_THREAD_LIBS_INIT})
+  endmacro(compile_gtest)
+
+  macro(add_gtest name)
+    compile_gtest(${name})
+    add_test(NAME ${name} COMMAND ${name})
+  endmacro()
+
+  add_gtest(benchmark_gtest)
+  add_gtest(benchmark_name_gtest)
+  add_gtest(benchmark_random_interleaving_gtest)
+  add_gtest(commandlineflags_gtest)
+  add_gtest(statistics_gtest)
+  add_gtest(string_util_gtest)
+  add_gtest(perf_counters_gtest)
+endif(BENCHMARK_ENABLE_GTEST_TESTS)
+
+###############################################################################
+# Assembly Unit Tests
+###############################################################################
+
+if (BENCHMARK_ENABLE_ASSEMBLY_TESTS)
+  if (NOT LLVM_FILECHECK_EXE)
+    message(FATAL_ERROR "LLVM FileCheck is required when including this file")
+  endif()
+  include(AssemblyTests.cmake)
+  add_filecheck_test(donotoptimize_assembly_test)
+  add_filecheck_test(state_assembly_test)
+  add_filecheck_test(clobber_memory_assembly_test)
+endif()
+
+
+
+###############################################################################
+# Code Coverage Configuration
+###############################################################################
+
+# Add the coverage command(s)
+if(CMAKE_BUILD_TYPE)
+  string(TOLOWER ${CMAKE_BUILD_TYPE} CMAKE_BUILD_TYPE_LOWER)
+endif()
+if (${CMAKE_BUILD_TYPE_LOWER} MATCHES "coverage")
+  find_program(GCOV gcov)
+  find_program(LCOV lcov)
+  find_program(GENHTML genhtml)
+  find_program(CTEST ctest)
+  if (GCOV AND LCOV AND GENHTML AND CTEST AND HAVE_CXX_FLAG_COVERAGE)
+    add_custom_command(
+      OUTPUT ${CMAKE_BINARY_DIR}/lcov/index.html
+      COMMAND ${LCOV} -q -z -d .
+      COMMAND ${LCOV} -q --no-external -c -b "${CMAKE_SOURCE_DIR}" -d . -o before.lcov -i
+      COMMAND ${CTEST} --force-new-ctest-process
+      COMMAND ${LCOV} -q --no-external -c -b "${CMAKE_SOURCE_DIR}" -d . -o after.lcov
+      COMMAND ${LCOV} -q -a before.lcov -a after.lcov --output-file final.lcov
+      COMMAND ${LCOV} -q -r final.lcov "'${CMAKE_SOURCE_DIR}/test/*'" -o final.lcov
+      COMMAND ${GENHTML} final.lcov -o lcov --demangle-cpp --sort -p "${CMAKE_BINARY_DIR}" -t benchmark
+      DEPENDS filter_test benchmark_test options_test basic_test fixture_test cxx03_test complexity_test
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+      COMMENT "Running LCOV"
+    )
+    add_custom_target(coverage
+      DEPENDS ${CMAKE_BINARY_DIR}/lcov/index.html
+      COMMENT "LCOV report at lcov/index.html"
+    )
+    message(STATUS "Coverage command added")
+  else()
+    if (HAVE_CXX_FLAG_COVERAGE)
+      set(CXX_FLAG_COVERAGE_MESSAGE supported)
+    else()
+      set(CXX_FLAG_COVERAGE_MESSAGE unavailable)
+    endif()
+    message(WARNING
+      "Coverage not available:\n"
+      "  gcov: ${GCOV}\n"
+      "  lcov: ${LCOV}\n"
+      "  genhtml: ${GENHTML}\n"
+      "  ctest: ${CTEST}\n"
+      "  --coverage flag: ${CXX_FLAG_COVERAGE_MESSAGE}")
+  endif()
+endif()
+
+
+//===== ./third-party/google-test/CMakeLists.txt =====
+# Note: CMake support is community-based. The maintainers do not use CMake
+# internally.
+
+cmake_minimum_required(VERSION 2.8.8)
+
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+endif (POLICY CMP0048)
+
+project(googletest-distribution)
+set(GOOGLETEST_VERSION 1.10.0)
+
+if (CMAKE_VERSION VERSION_LESS "3.1")
+  add_definitions(-std=c++11)
+else()
+  set(CMAKE_CXX_STANDARD 11)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  if(NOT CYGWIN AND NOT MSYS)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+  endif()
+endif()
+
+enable_testing()
+
+include(CMakeDependentOption)
+include(GNUInstallDirs)
+
+#Note that googlemock target already builds googletest
+option(BUILD_GMOCK "Builds the googlemock subproject" ON)
+option(INSTALL_GTEST "Enable installation of googletest. (Projects embedding googletest may want to turn this OFF.)" ON)
+
+if(BUILD_GMOCK)
+  add_subdirectory( googlemock )
+else()
+  add_subdirectory( googletest )
+endif()
+
+
+//===== ./third-party/google-test/googlemock/CMakeLists.txt =====
+########################################################################
+# Note: CMake support is community-based. The maintainers do not use CMake
+# internally.
+#
+# CMake build script for Google Mock.
+#
+# To run the tests for Google Mock itself on Linux, use 'make test' or
+# ctest.  You can select which tests to run using 'ctest -R regex'.
+# For more options, run 'ctest --help'.
+
+option(gmock_build_tests "Build all of Google Mock's own tests." OFF)
+
+# A directory to find Google Test sources.
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/gtest/CMakeLists.txt")
+  set(gtest_dir gtest)
+else()
+  set(gtest_dir ../googletest)
+endif()
+
+# Defines pre_project_set_up_hermetic_build() and set_up_hermetic_build().
+include("${gtest_dir}/cmake/hermetic_build.cmake" OPTIONAL)
+
+if (COMMAND pre_project_set_up_hermetic_build)
+  # Google Test also calls hermetic setup functions from add_subdirectory,
+  # although its changes will not affect things at the current scope.
+  pre_project_set_up_hermetic_build()
+endif()
+
+########################################################################
+#
+# Project-wide settings
+
+# Name of the project.
+#
+# CMake files in this project can refer to the root source directory
+# as ${gmock_SOURCE_DIR} and to the root binary directory as
+# ${gmock_BINARY_DIR}.
+# Language "C" is required for find_package(Threads).
+if (CMAKE_VERSION VERSION_LESS 3.0)
+  project(gmock CXX C)
+else()
+  cmake_policy(SET CMP0048 NEW)
+  project(gmock VERSION ${GOOGLETEST_VERSION} LANGUAGES CXX C)
+endif()
+cmake_minimum_required(VERSION 2.6.4)
+
+if (COMMAND set_up_hermetic_build)
+  set_up_hermetic_build()
+endif()
+
+# Instructs CMake to process Google Test's CMakeLists.txt and add its
+# targets to the current scope.  We are placing Google Test's binary
+# directory in a subdirectory of our own as VC compilation may break
+# if they are the same (the default).
+add_subdirectory("${gtest_dir}" "${gmock_BINARY_DIR}/${gtest_dir}")
+
+
+# These commands only run if this is the main project
+if(CMAKE_PROJECT_NAME STREQUAL "gmock" OR CMAKE_PROJECT_NAME STREQUAL "googletest-distribution")
+  # BUILD_SHARED_LIBS is a standard CMake variable, but we declare it here to
+  # make it prominent in the GUI.
+  option(BUILD_SHARED_LIBS "Build shared libraries (DLLs)." OFF)
+else()
+  mark_as_advanced(gmock_build_tests)
+endif()
+
+# Although Google Test's CMakeLists.txt calls this function, the
+# changes there don't affect the current scope.  Therefore we have to
+# call it again here.
+config_compiler_and_linker()  # from ${gtest_dir}/cmake/internal_utils.cmake
+
+# Adds Google Mock's and Google Test's header directories to the search path.
+set(gmock_build_include_dirs
+  "${gmock_SOURCE_DIR}/include"
+  "${gmock_SOURCE_DIR}"
+  "${gtest_SOURCE_DIR}/include"
+  # This directory is needed to build directly from Google Test sources.
+  "${gtest_SOURCE_DIR}")
+include_directories(${gmock_build_include_dirs})
+
+########################################################################
+#
+# Defines the gmock & gmock_main libraries.  User tests should link
+# with one of them.
+
+# Google Mock libraries.  We build them using more strict warnings than what
+# are used for other targets, to ensure that Google Mock can be compiled by
+# a user aggressive about warnings.
+if (MSVC)
+  cxx_library(gmock
+              "${cxx_strict}"
+              "${gtest_dir}/src/gtest-all.cc"
+              src/gmock-all.cc)
+
+  cxx_library(gmock_main
+              "${cxx_strict}"
+              "${gtest_dir}/src/gtest-all.cc"
+              src/gmock-all.cc
+              src/gmock_main.cc)
+else()
+  cxx_library(gmock "${cxx_strict}" src/gmock-all.cc)
+  target_link_libraries(gmock PUBLIC gtest)
+  cxx_library(gmock_main "${cxx_strict}" src/gmock_main.cc)
+  target_link_libraries(gmock_main PUBLIC gmock)
+endif()
+# If the CMake version supports it, attach header directory information
+# to the targets for when we are part of a parent build (ie being pulled
+# in via add_subdirectory() rather than being a standalone build).
+if (DEFINED CMAKE_VERSION AND NOT "${CMAKE_VERSION}" VERSION_LESS "2.8.11")
+  target_include_directories(gmock SYSTEM INTERFACE
+    "$<BUILD_INTERFACE:${gmock_build_include_dirs}>"
+    "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>")
+  target_include_directories(gmock_main SYSTEM INTERFACE
+    "$<BUILD_INTERFACE:${gmock_build_include_dirs}>"
+    "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>")
+endif()
+
+########################################################################
+#
+# Install rules
+install_project(gmock gmock_main)
+
+########################################################################
+#
+# Google Mock's own tests.
+#
+# You can skip this section if you aren't interested in testing
+# Google Mock itself.
+#
+# The tests are not built by default.  To build them, set the
+# gmock_build_tests option to ON.  You can do it by running ccmake
+# or specifying the -Dgmock_build_tests=ON flag when running cmake.
+
+if (gmock_build_tests)
+  # This must be set in the root directory for the tests to be run by
+  # 'make test' or ctest.
+  enable_testing()
+
+  if (WIN32)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/RunTest.ps1"
+         CONTENT
+"$project_bin = \"${CMAKE_BINARY_DIR}/bin/$<CONFIG>\"
+$env:Path = \"$project_bin;$env:Path\"
+& $args")
+  elseif (MINGW OR CYGWIN)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/RunTest.ps1"
+         CONTENT
+"$project_bin = (cygpath --windows ${CMAKE_BINARY_DIR}/bin)
+$env:Path = \"$project_bin;$env:Path\"
+& $args")
+  endif()
+
+  if (MINGW OR CYGWIN)
+    if (CMAKE_VERSION VERSION_LESS "2.8.12")
+      add_compile_options("-Wa,-mbig-obj")
+    else()
+      add_definitions("-Wa,-mbig-obj")
+    endif()
+  endif()
+
+  ############################################################
+  # C++ tests built with standard compiler flags.
+
+  cxx_test(gmock-actions_test gmock_main)
+  cxx_test(gmock-cardinalities_test gmock_main)
+  cxx_test(gmock_ex_test gmock_main)
+  cxx_test(gmock-function-mocker_test gmock_main)
+  cxx_test(gmock-generated-actions_test gmock_main)
+  cxx_test(gmock-generated-function-mockers_test gmock_main)
+  cxx_test(gmock-generated-matchers_test gmock_main)
+  cxx_test(gmock-internal-utils_test gmock_main)
+  cxx_test(gmock-matchers_test gmock_main)
+  cxx_test(gmock-more-actions_test gmock_main)
+  cxx_test(gmock-nice-strict_test gmock_main)
+  cxx_test(gmock-port_test gmock_main)
+  cxx_test(gmock-spec-builders_test gmock_main)
+  cxx_test(gmock_link_test gmock_main test/gmock_link2_test.cc)
+  cxx_test(gmock_test gmock_main)
+
+  if (DEFINED GTEST_HAS_PTHREAD)
+    cxx_test(gmock_stress_test gmock)
+  endif()
+
+  # gmock_all_test is commented to save time building and running tests.
+  # Uncomment if necessary.
+  # cxx_test(gmock_all_test gmock_main)
+
+  ############################################################
+  # C++ tests built with non-standard compiler flags.
+
+  if (MSVC)
+    cxx_library(gmock_main_no_exception "${cxx_no_exception}"
+      "${gtest_dir}/src/gtest-all.cc" src/gmock-all.cc src/gmock_main.cc)
+
+    cxx_library(gmock_main_no_rtti "${cxx_no_rtti}"
+      "${gtest_dir}/src/gtest-all.cc" src/gmock-all.cc src/gmock_main.cc)
+
+  else()
+    cxx_library(gmock_main_no_exception "${cxx_no_exception}" src/gmock_main.cc)
+    target_link_libraries(gmock_main_no_exception PUBLIC gmock)
+
+    cxx_library(gmock_main_no_rtti "${cxx_no_rtti}" src/gmock_main.cc)
+    target_link_libraries(gmock_main_no_rtti PUBLIC gmock)
+  endif()
+  cxx_test_with_flags(gmock-more-actions_no_exception_test "${cxx_no_exception}"
+    gmock_main_no_exception test/gmock-more-actions_test.cc)
+
+  cxx_test_with_flags(gmock_no_rtti_test "${cxx_no_rtti}"
+    gmock_main_no_rtti test/gmock-spec-builders_test.cc)
+
+  cxx_shared_library(shared_gmock_main "${cxx_default}"
+    "${gtest_dir}/src/gtest-all.cc" src/gmock-all.cc src/gmock_main.cc)
+
+  # Tests that a binary can be built with Google Mock as a shared library.  On
+  # some system configurations, it may not possible to run the binary without
+  # knowing more details about the system configurations. We do not try to run
+  # this binary. To get a more robust shared library coverage, configure with
+  # -DBUILD_SHARED_LIBS=ON.
+  cxx_executable_with_flags(shared_gmock_test_ "${cxx_default}"
+    shared_gmock_main test/gmock-spec-builders_test.cc)
+  set_target_properties(shared_gmock_test_
+    PROPERTIES
+    COMPILE_DEFINITIONS "GTEST_LINKED_AS_SHARED_LIBRARY=1")
+
+  ############################################################
+  # Python tests.
+
+  cxx_executable(gmock_leak_test_ test gmock_main)
+  py_test(gmock_leak_test)
+
+  cxx_executable(gmock_output_test_ test gmock)
+  py_test(gmock_output_test)
+endif()
+
+
+//===== ./third-party/google-test/googletest/cmake/internal_utils.cmake =====
+# Defines functions and macros useful for building Google Test and
+# Google Mock.
+#
+# Note:
+#
+# - This file will be run twice when building Google Mock (once via
+#   Google Test's CMakeLists.txt, and once via Google Mock's).
+#   Therefore it shouldn't have any side effects other than defining
+#   the functions and macros.
+#
+# - The functions/macros defined in this file may depend on Google
+#   Test and Google Mock's option() definitions, and thus must be
+#   called *after* the options have been defined.
+
+if (POLICY CMP0054)
+  cmake_policy(SET CMP0054 NEW)
+endif (POLICY CMP0054)
+
+# Tweaks CMake's default compiler/linker settings to suit Google Test's needs.
+#
+# This must be a macro(), as inside a function string() can only
+# update variables in the function scope.
+macro(fix_default_compiler_settings_)
+  if (MSVC)
+    # For MSVC, CMake sets certain flags to defaults we want to override.
+    # This replacement code is taken from sample in the CMake Wiki at
+    # https://gitlab.kitware.com/cmake/community/wikis/FAQ#dynamic-replace.
+    foreach (flag_var
+             CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+             CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
+             CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+             CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if (NOT BUILD_SHARED_LIBS AND NOT gtest_force_shared_crt)
+        # When Google Test is built as a shared library, it should also use
+        # shared runtime libraries.  Otherwise, it may end up with multiple
+        # copies of runtime library data in different modules, resulting in
+        # hard-to-find crashes. When it is built as a static library, it is
+        # preferable to use CRT as static libraries, as we don't have to rely
+        # on CRT DLLs being available. CMake always defaults to using shared
+        # CRT libraries, so we override that default here.
+        string(REPLACE "/MD" "-MT" ${flag_var} "${${flag_var}}")
+      endif()
+
+      # We prefer more strict warning checking for building Google Test.
+      # Replaces /W3 with /W4 in defaults.
+      string(REPLACE "/W3" "/W4" ${flag_var} "${${flag_var}}")
+
+      # Prevent D9025 warning for targets that have exception handling
+      # turned off (/EHs-c- flag). Where required, exceptions are explicitly
+      # re-enabled using the cxx_exception_flags variable.
+      string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
+    endforeach()
+  endif()
+endmacro()
+
+# Defines the compiler/linker flags used to build Google Test and
+# Google Mock.  You can tweak these definitions to suit your need.  A
+# variable's value is empty before it's explicitly assigned to.
+macro(config_compiler_and_linker)
+  # Note: pthreads on MinGW is not supported, even if available
+  # instead, we use windows threading primitives
+  unset(GTEST_HAS_PTHREAD)
+  if (NOT gtest_disable_pthreads AND NOT MINGW)
+    # Defines CMAKE_USE_PTHREADS_INIT and CMAKE_THREAD_LIBS_INIT.
+    find_package(Threads)
+    if (CMAKE_USE_PTHREADS_INIT)
+      set(GTEST_HAS_PTHREAD ON)
+    endif()
+  endif()
+
+  fix_default_compiler_settings_()
+  if (MSVC)
+    # Newlines inside flags variables break CMake's NMake generator.
+    # TODO(vladl@google.com): Add -RTCs and -RTCu to debug builds.
+    set(cxx_base_flags "-GS -W4 -WX -wd4251 -wd4275 -nologo -J -Zi")
+    set(cxx_base_flags "${cxx_base_flags} -D_UNICODE -DUNICODE -DWIN32 -D_WIN32")
+    set(cxx_base_flags "${cxx_base_flags} -DSTRICT -DWIN32_LEAN_AND_MEAN")
+    set(cxx_exception_flags "-EHsc -D_HAS_EXCEPTIONS=1")
+    set(cxx_no_exception_flags "-EHs-c- -D_HAS_EXCEPTIONS=0")
+    set(cxx_no_rtti_flags "-GR-")
+    # Suppress "unreachable code" warning
+    # http://stackoverflow.com/questions/3232669 explains the issue.
+    set(cxx_base_flags "${cxx_base_flags} -wd4702")
+  elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(cxx_base_flags "-Wall -Wshadow -Werror -Wconversion")
+    set(cxx_exception_flags "-fexceptions")
+    set(cxx_no_exception_flags "-fno-exceptions")
+    set(cxx_strict_flags "-W -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wunused-parameter -Wcast-align -Wchar-subscripts -Winline -Wredundant-decls")
+    set(cxx_no_rtti_flags "-fno-rtti")
+  elseif (CMAKE_COMPILER_IS_GNUCXX)
+    set(cxx_base_flags "-Wall -Wshadow -Werror")
+    if(NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0)
+      set(cxx_base_flags "${cxx_base_flags} -Wno-error=dangling-else")
+    endif()
+    set(cxx_exception_flags "-fexceptions")
+    set(cxx_no_exception_flags "-fno-exceptions")
+    # Until version 4.3.2, GCC doesn't define a macro to indicate
+    # whether RTTI is enabled.  Therefore we define GTEST_HAS_RTTI
+    # explicitly.
+    set(cxx_no_rtti_flags "-fno-rtti -DGTEST_HAS_RTTI=0")
+    set(cxx_strict_flags
+      "-Wextra -Wno-unused-parameter -Wno-missing-field-initializers")
+  elseif (CMAKE_CXX_COMPILER_ID STREQUAL "SunPro")
+    set(cxx_exception_flags "-features=except")
+    # Sun Pro doesn't provide macros to indicate whether exceptions and
+    # RTTI are enabled, so we define GTEST_HAS_* explicitly.
+    set(cxx_no_exception_flags "-features=no%except -DGTEST_HAS_EXCEPTIONS=0")
+    set(cxx_no_rtti_flags "-features=no%rtti -DGTEST_HAS_RTTI=0")
+  elseif (CMAKE_CXX_COMPILER_ID STREQUAL "VisualAge" OR
+      CMAKE_CXX_COMPILER_ID STREQUAL "XL")
+    # CMake 2.8 changes Visual Age's compiler ID to "XL".
+    set(cxx_exception_flags "-qeh")
+    set(cxx_no_exception_flags "-qnoeh")
+    # Until version 9.0, Visual Age doesn't define a macro to indicate
+    # whether RTTI is enabled.  Therefore we define GTEST_HAS_RTTI
+    # explicitly.
+    set(cxx_no_rtti_flags "-qnortti -DGTEST_HAS_RTTI=0")
+  elseif (CMAKE_CXX_COMPILER_ID STREQUAL "HP")
+    set(cxx_base_flags "-AA -mt")
+    set(cxx_exception_flags "-DGTEST_HAS_EXCEPTIONS=1")
+    set(cxx_no_exception_flags "+noeh -DGTEST_HAS_EXCEPTIONS=0")
+    # RTTI can not be disabled in HP aCC compiler.
+    set(cxx_no_rtti_flags "")
+  endif()
+
+  # The pthreads library is available and allowed?
+  if (DEFINED GTEST_HAS_PTHREAD)
+    set(GTEST_HAS_PTHREAD_MACRO "-DGTEST_HAS_PTHREAD=1")
+  else()
+    set(GTEST_HAS_PTHREAD_MACRO "-DGTEST_HAS_PTHREAD=0")
+  endif()
+  set(cxx_base_flags "${cxx_base_flags} ${GTEST_HAS_PTHREAD_MACRO}")
+
+  # For building gtest's own tests and samples.
+  set(cxx_exception "${cxx_base_flags} ${cxx_exception_flags}")
+  set(cxx_no_exception
+    "${CMAKE_CXX_FLAGS} ${cxx_base_flags} ${cxx_no_exception_flags}")
+  set(cxx_default "${cxx_exception}")
+  set(cxx_no_rtti "${cxx_default} ${cxx_no_rtti_flags}")
+
+  # For building the gtest libraries.
+  set(cxx_strict "${cxx_default} ${cxx_strict_flags}")
+endmacro()
+
+# Defines the gtest & gtest_main libraries.  User tests should link
+# with one of them.
+function(cxx_library_with_type name type cxx_flags)
+  # type can be either STATIC or SHARED to denote a static or shared library.
+  # ARGN refers to additional arguments after 'cxx_flags'.
+  add_library(${name} ${type} ${ARGN})
+  set_target_properties(${name}
+    PROPERTIES
+    COMPILE_FLAGS "${cxx_flags}")
+  # Generate debug library name with a postfix.
+  set_target_properties(${name}
+    PROPERTIES
+    DEBUG_POSTFIX "d")
+  # Set the output directory for build artifacts
+  set_target_properties(${name}
+    PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  # make PDBs match library name
+  get_target_property(pdb_debug_postfix ${name} DEBUG_POSTFIX)
+  set_target_properties(${name}
+    PROPERTIES
+    PDB_NAME "${name}"
+    PDB_NAME_DEBUG "${name}${pdb_debug_postfix}"
+    COMPILE_PDB_NAME "${name}"
+    COMPILE_PDB_NAME_DEBUG "${name}${pdb_debug_postfix}")
+
+  if (BUILD_SHARED_LIBS OR type STREQUAL "SHARED")
+    set_target_properties(${name}
+      PROPERTIES
+      COMPILE_DEFINITIONS "GTEST_CREATE_SHARED_LIBRARY=1")
+    if (NOT "${CMAKE_VERSION}" VERSION_LESS "2.8.11")
+      target_compile_definitions(${name} INTERFACE
+        $<INSTALL_INTERFACE:GTEST_LINKED_AS_SHARED_LIBRARY=1>)
+    endif()
+  endif()
+  if (DEFINED GTEST_HAS_PTHREAD)
+    if ("${CMAKE_VERSION}" VERSION_LESS "3.1.0")
+      set(threads_spec ${CMAKE_THREAD_LIBS_INIT})
+    else()
+      set(threads_spec Threads::Threads)
+    endif()
+    target_link_libraries(${name} PUBLIC ${threads_spec})
+  endif()
+endfunction()
+
+########################################################################
+#
+# Helper functions for creating build targets.
+
+function(cxx_shared_library name cxx_flags)
+  cxx_library_with_type(${name} SHARED "${cxx_flags}" ${ARGN})
+endfunction()
+
+function(cxx_library name cxx_flags)
+  cxx_library_with_type(${name} "" "${cxx_flags}" ${ARGN})
+endfunction()
+
+# cxx_executable_with_flags(name cxx_flags libs srcs...)
+#
+# creates a named C++ executable that depends on the given libraries and
+# is built from the given source files with the given compiler flags.
+function(cxx_executable_with_flags name cxx_flags libs)
+  add_executable(${name} ${ARGN})
+  if (MSVC)
+    # BigObj required for tests.
+    set(cxx_flags "${cxx_flags} -bigobj")
+  endif()
+  if (cxx_flags)
+    set_target_properties(${name}
+      PROPERTIES
+      COMPILE_FLAGS "${cxx_flags}")
+  endif()
+  if (BUILD_SHARED_LIBS)
+    set_target_properties(${name}
+      PROPERTIES
+      COMPILE_DEFINITIONS "GTEST_LINKED_AS_SHARED_LIBRARY=1")
+  endif()
+  # To support mixing linking in static and dynamic libraries, link each
+  # library in with an extra call to target_link_libraries.
+  foreach (lib "${libs}")
+    target_link_libraries(${name} ${lib})
+  endforeach()
+endfunction()
+
+# cxx_executable(name dir lib srcs...)
+#
+# creates a named target that depends on the given libs and is built
+# from the given source files.  dir/name.cc is implicitly included in
+# the source file list.
+function(cxx_executable name dir libs)
+  cxx_executable_with_flags(
+    ${name} "${cxx_default}" "${libs}" "${dir}/${name}.cc" ${ARGN})
+endfunction()
+
+# Sets PYTHONINTERP_FOUND and PYTHON_EXECUTABLE.
+find_package(PythonInterp)
+
+# cxx_test_with_flags(name cxx_flags libs srcs...)
+#
+# creates a named C++ test that depends on the given libs and is built
+# from the given source files with the given compiler flags.
+function(cxx_test_with_flags name cxx_flags libs)
+  cxx_executable_with_flags(${name} "${cxx_flags}" "${libs}" ${ARGN})
+  if (WIN32 OR MINGW)
+    add_test(NAME ${name}
+      COMMAND "powershell" "-Command" "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/RunTest.ps1" "$<TARGET_FILE:${name}>")
+  else()
+    add_test(NAME ${name}
+      COMMAND "$<TARGET_FILE:${name}>")
+  endif()
+endfunction()
+
+# cxx_test(name libs srcs...)
+#
+# creates a named test target that depends on the given libs and is
+# built from the given source files.  Unlike cxx_test_with_flags,
+# test/name.cc is already implicitly included in the source file list.
+function(cxx_test name libs)
+  cxx_test_with_flags("${name}" "${cxx_default}" "${libs}"
+    "test/${name}.cc" ${ARGN})
+endfunction()
+
+# py_test(name)
+#
+# creates a Python test with the given name whose main module is in
+# test/name.py.  It does nothing if Python is not installed.
+function(py_test name)
+  if (PYTHONINTERP_FOUND)
+    if ("${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}" VERSION_GREATER 3.1)
+      if (CMAKE_CONFIGURATION_TYPES)
+        # Multi-configuration build generators as for Visual Studio save
+        # output in a subdirectory of CMAKE_CURRENT_BINARY_DIR (Debug,
+        # Release etc.), so we have to provide it here.
+        if (WIN32 OR MINGW)
+          add_test(NAME ${name}
+            COMMAND powershell -Command ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/RunTest.ps1
+              ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}.py
+              --build_dir=${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG> ${ARGN})
+        else()
+          add_test(NAME ${name}
+            COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}.py
+              --build_dir=${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG> ${ARGN})
+        endif()
+      else (CMAKE_CONFIGURATION_TYPES)
+        # Single-configuration build generators like Makefile generators
+        # don't have subdirs below CMAKE_CURRENT_BINARY_DIR.
+        if (WIN32 OR MINGW)
+          add_test(NAME ${name}
+            COMMAND powershell -Command ${CMAKE_CURRENT_BINARY_DIR}/RunTest.ps1
+              ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}.py
+              --build_dir=${CMAKE_CURRENT_BINARY_DIR} ${ARGN})
+        else()
+          add_test(NAME ${name}
+            COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}.py
+              --build_dir=${CMAKE_CURRENT_BINARY_DIR} ${ARGN})
+        endif()
+      endif (CMAKE_CONFIGURATION_TYPES)
+    else()
+      # ${CMAKE_CURRENT_BINARY_DIR} is known at configuration time, so we can
+      # directly bind it from cmake. ${CTEST_CONFIGURATION_TYPE} is known
+      # only at ctest runtime (by calling ctest -c <Configuration>), so
+      # we have to escape $ to delay variable substitution here.
+      if (WIN32 OR MINGW)
+        add_test(NAME ${name}
+          COMMAND powershell -Command ${CMAKE_CURRENT_BINARY_DIR}/RunTest.ps1
+            ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}.py
+            --build_dir=${CMAKE_CURRENT_BINARY_DIR}/\${CTEST_CONFIGURATION_TYPE} ${ARGN})
+      else()
+        add_test(NAME ${name}
+          COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}.py
+            --build_dir=${CMAKE_CURRENT_BINARY_DIR}/\${CTEST_CONFIGURATION_TYPE} ${ARGN})
+      endif()
+    endif()
+  endif(PYTHONINTERP_FOUND)
+endfunction()
+
+# install_project(targets...)
+#
+# Installs the specified targets and configures the associated pkgconfig files.
+function(install_project)
+  if(INSTALL_GTEST)
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+    # Install the project targets.
+    install(TARGETS ${ARGN}
+      EXPORT ${targets_export_name}
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+      # Install PDBs
+      foreach(t ${ARGN})
+        get_target_property(t_pdb_name ${t} COMPILE_PDB_NAME)
+        get_target_property(t_pdb_name_debug ${t} COMPILE_PDB_NAME_DEBUG)
+        get_target_property(t_pdb_output_directory ${t} PDB_OUTPUT_DIRECTORY)
+        install(FILES
+          "${t_pdb_output_directory}/\${CMAKE_INSTALL_CONFIG_NAME}/$<$<CONFIG:Debug>:${t_pdb_name_debug}>$<$<NOT:$<CONFIG:Debug>>:${t_pdb_name}>.pdb"
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          OPTIONAL)
+      endforeach()
+    endif()
+    # Configure and install pkgconfig files.
+    foreach(t ${ARGN})
+      set(configured_pc "${generated_dir}/${t}.pc")
+      configure_file("${PROJECT_SOURCE_DIR}/cmake/${t}.pc.in"
+        "${configured_pc}" @ONLY)
+      install(FILES "${configured_pc}"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+    endforeach()
+  endif()
+endfunction()
+
+
+//===== ./third-party/google-test/googletest/CMakeLists.txt =====
+########################################################################
+# Note: CMake support is community-based. The maintainers do not use CMake
+# internally.
+#
+# CMake build script for Google Test.
+#
+# To run the tests for Google Test itself on Linux, use 'make test' or
+# ctest.  You can select which tests to run using 'ctest -R regex'.
+# For more options, run 'ctest --help'.
+
+# When other libraries are using a shared version of runtime libraries,
+# Google Test also has to use one.
+option(
+  gtest_force_shared_crt
+  "Use shared (DLL) run-time lib even when Google Test is built as static lib."
+  OFF)
+
+option(gtest_build_tests "Build all of gtest's own tests." OFF)
+
+option(gtest_build_samples "Build gtest's sample programs." OFF)
+
+option(gtest_disable_pthreads "Disable uses of pthreads in gtest." OFF)
+
+option(
+  gtest_hide_internal_symbols
+  "Build gtest with internal symbols hidden in shared libraries."
+  OFF)
+
+# Defines pre_project_set_up_hermetic_build() and set_up_hermetic_build().
+include(cmake/hermetic_build.cmake OPTIONAL)
+
+if (COMMAND pre_project_set_up_hermetic_build)
+  pre_project_set_up_hermetic_build()
+endif()
+
+########################################################################
+#
+# Project-wide settings
+
+# Name of the project.
+#
+# CMake files in this project can refer to the root source directory
+# as ${gtest_SOURCE_DIR} and to the root binary directory as
+# ${gtest_BINARY_DIR}.
+# Language "C" is required for find_package(Threads).
+
+# Project version:
+
+if (CMAKE_VERSION VERSION_LESS 3.0)
+  project(gtest CXX C)
+  set(PROJECT_VERSION ${GOOGLETEST_VERSION})
+else()
+  cmake_policy(SET CMP0048 NEW)
+  project(gtest VERSION ${GOOGLETEST_VERSION} LANGUAGES CXX C)
+endif()
+cmake_minimum_required(VERSION 2.6.4)
+
+if (POLICY CMP0063) # Visibility
+  cmake_policy(SET CMP0063 NEW)
+endif (POLICY CMP0063)
+
+if (COMMAND set_up_hermetic_build)
+  set_up_hermetic_build()
+endif()
+
+# These commands only run if this is the main project
+if(CMAKE_PROJECT_NAME STREQUAL "gtest" OR CMAKE_PROJECT_NAME STREQUAL "googletest-distribution")
+
+  # BUILD_SHARED_LIBS is a standard CMake variable, but we declare it here to
+  # make it prominent in the GUI.
+  option(BUILD_SHARED_LIBS "Build shared libraries (DLLs)." OFF)
+
+else()
+
+  mark_as_advanced(
+    gtest_force_shared_crt
+    gtest_build_tests
+    gtest_build_samples
+    gtest_disable_pthreads
+    gtest_hide_internal_symbols)
+
+endif()
+
+
+if (gtest_hide_internal_symbols)
+  set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+  set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
+endif()
+
+# Define helper functions and macros used by Google Test.
+include(cmake/internal_utils.cmake)
+
+config_compiler_and_linker()  # Defined in internal_utils.cmake.
+
+# Create the CMake package file descriptors.
+if (INSTALL_GTEST)
+  include(CMakePackageConfigHelpers)
+  set(cmake_package_name GTest)
+  set(targets_export_name ${cmake_package_name}Targets CACHE INTERNAL "")
+  set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated" CACHE INTERNAL "")
+  set(cmake_files_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/${cmake_package_name}")
+  set(version_file "${generated_dir}/${cmake_package_name}ConfigVersion.cmake")
+  write_basic_package_version_file(${version_file} VERSION ${GOOGLETEST_VERSION} COMPATIBILITY AnyNewerVersion)
+  install(EXPORT ${targets_export_name}
+    NAMESPACE ${cmake_package_name}::
+    DESTINATION ${cmake_files_install_dir})
+  set(config_file "${generated_dir}/${cmake_package_name}Config.cmake")
+  configure_package_config_file("${gtest_SOURCE_DIR}/cmake/Config.cmake.in"
+    "${config_file}" INSTALL_DESTINATION ${cmake_files_install_dir})
+  install(FILES ${version_file} ${config_file}
+    DESTINATION ${cmake_files_install_dir})
+endif()
+
+# Where Google Test's .h files can be found.
+set(gtest_build_include_dirs
+  "${gtest_SOURCE_DIR}/include"
+  "${gtest_SOURCE_DIR}")
+include_directories(${gtest_build_include_dirs})
+
+########################################################################
+#
+# Defines the gtest & gtest_main libraries.  User tests should link
+# with one of them.
+
+# Google Test libraries.  We build them using more strict warnings than what
+# are used for other targets, to ensure that gtest can be compiled by a user
+# aggressive about warnings.
+cxx_library(gtest "${cxx_strict}" src/gtest-all.cc)
+cxx_library(gtest_main "${cxx_strict}" src/gtest_main.cc)
+# If the CMake version supports it, attach header directory information
+# to the targets for when we are part of a parent build (ie being pulled
+# in via add_subdirectory() rather than being a standalone build).
+if (DEFINED CMAKE_VERSION AND NOT "${CMAKE_VERSION}" VERSION_LESS "2.8.11")
+  target_include_directories(gtest SYSTEM INTERFACE
+    "$<BUILD_INTERFACE:${gtest_build_include_dirs}>"
+    "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>")
+  target_include_directories(gtest_main SYSTEM INTERFACE
+    "$<BUILD_INTERFACE:${gtest_build_include_dirs}>"
+    "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>")
+endif()
+target_link_libraries(gtest_main PUBLIC gtest)
+
+########################################################################
+#
+# Install rules
+install_project(gtest gtest_main)
+
+########################################################################
+#
+# Samples on how to link user tests with gtest or gtest_main.
+#
+# They are not built by default.  To build them, set the
+# gtest_build_samples option to ON.  You can do it by running ccmake
+# or specifying the -Dgtest_build_samples=ON flag when running cmake.
+
+if (gtest_build_samples)
+  cxx_executable(sample1_unittest samples gtest_main samples/sample1.cc)
+  cxx_executable(sample2_unittest samples gtest_main samples/sample2.cc)
+  cxx_executable(sample3_unittest samples gtest_main)
+  cxx_executable(sample4_unittest samples gtest_main samples/sample4.cc)
+  cxx_executable(sample5_unittest samples gtest_main samples/sample1.cc)
+  cxx_executable(sample6_unittest samples gtest_main)
+  cxx_executable(sample7_unittest samples gtest_main)
+  cxx_executable(sample8_unittest samples gtest_main)
+  cxx_executable(sample9_unittest samples gtest)
+  cxx_executable(sample10_unittest samples gtest)
+endif()
+
+########################################################################
+#
+# Google Test's own tests.
+#
+# You can skip this section if you aren't interested in testing
+# Google Test itself.
+#
+# The tests are not built by default.  To build them, set the
+# gtest_build_tests option to ON.  You can do it by running ccmake
+# or specifying the -Dgtest_build_tests=ON flag when running cmake.
+
+if (gtest_build_tests)
+  # This must be set in the root directory for the tests to be run by
+  # 'make test' or ctest.
+  enable_testing()
+
+  if (WIN32)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/RunTest.ps1"
+         CONTENT
+"$project_bin = \"${CMAKE_BINARY_DIR}/bin/$<CONFIG>\"
+$env:Path = \"$project_bin;$env:Path\"
+& $args")
+  elseif (MINGW OR CYGWIN)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/RunTest.ps1"
+         CONTENT
+"$project_bin = (cygpath --windows ${CMAKE_BINARY_DIR}/bin)
+$env:Path = \"$project_bin;$env:Path\"
+& $args")
+  endif()
+
+  ############################################################
+  # C++ tests built with standard compiler flags.
+
+  cxx_test(googletest-death-test-test gtest_main)
+  cxx_test(gtest_environment_test gtest)
+  cxx_test(googletest-filepath-test gtest_main)
+  cxx_test(googletest-listener-test gtest_main)
+  cxx_test(gtest_main_unittest gtest_main)
+  cxx_test(googletest-message-test gtest_main)
+  cxx_test(gtest_no_test_unittest gtest)
+  cxx_test(googletest-options-test gtest_main)
+  cxx_test(googletest-param-test-test gtest
+    test/googletest-param-test2-test.cc)
+  cxx_test(googletest-port-test gtest_main)
+  cxx_test(gtest_pred_impl_unittest gtest_main)
+  cxx_test(gtest_premature_exit_test gtest
+    test/gtest_premature_exit_test.cc)
+  cxx_test(googletest-printers-test gtest_main)
+  cxx_test(gtest_prod_test gtest_main
+    test/production.cc)
+  cxx_test(gtest_repeat_test gtest)
+  cxx_test(gtest_sole_header_test gtest_main)
+  cxx_test(gtest_stress_test gtest)
+  cxx_test(googletest-test-part-test gtest_main)
+  cxx_test(gtest_throw_on_failure_ex_test gtest)
+  cxx_test(gtest-typed-test_test gtest_main
+    test/gtest-typed-test2_test.cc)
+  cxx_test(gtest_unittest gtest_main)
+  cxx_test(gtest-unittest-api_test gtest)
+  cxx_test(gtest_skip_in_environment_setup_test gtest_main)
+  cxx_test(gtest_skip_test gtest_main)
+
+  ############################################################
+  # C++ tests built with non-standard compiler flags.
+
+  # MSVC 7.1 does not support STL with exceptions disabled.
+  if (NOT MSVC OR MSVC_VERSION GREATER 1310)
+    cxx_library(gtest_no_exception "${cxx_no_exception}"
+      src/gtest-all.cc)
+    cxx_library(gtest_main_no_exception "${cxx_no_exception}"
+      src/gtest-all.cc src/gtest_main.cc)
+  endif()
+  cxx_library(gtest_main_no_rtti "${cxx_no_rtti}"
+    src/gtest-all.cc src/gtest_main.cc)
+
+  cxx_test_with_flags(gtest-death-test_ex_nocatch_test
+    "${cxx_exception} -DGTEST_ENABLE_CATCH_EXCEPTIONS_=0"
+    gtest test/googletest-death-test_ex_test.cc)
+  cxx_test_with_flags(gtest-death-test_ex_catch_test
+    "${cxx_exception} -DGTEST_ENABLE_CATCH_EXCEPTIONS_=1"
+    gtest test/googletest-death-test_ex_test.cc)
+
+  cxx_test_with_flags(gtest_no_rtti_unittest "${cxx_no_rtti}"
+    gtest_main_no_rtti test/gtest_unittest.cc)
+
+  cxx_shared_library(gtest_dll "${cxx_default}"
+    src/gtest-all.cc src/gtest_main.cc)
+
+  cxx_executable_with_flags(gtest_dll_test_ "${cxx_default}"
+    gtest_dll test/gtest_all_test.cc)
+  set_target_properties(gtest_dll_test_
+                        PROPERTIES
+                        COMPILE_DEFINITIONS "GTEST_LINKED_AS_SHARED_LIBRARY=1")
+
+  ############################################################
+  # Python tests.
+
+  cxx_executable(googletest-break-on-failure-unittest_ test gtest)
+  py_test(googletest-break-on-failure-unittest)
+
+  py_test(gtest_skip_check_output_test)
+  py_test(gtest_skip_environment_check_output_test)
+
+  # Visual Studio .NET 2003 does not support STL with exceptions disabled.
+  if (NOT MSVC OR MSVC_VERSION GREATER 1310)  # 1310 is Visual Studio .NET 2003
+    cxx_executable_with_flags(
+      googletest-catch-exceptions-no-ex-test_
+      "${cxx_no_exception}"
+      gtest_main_no_exception
+      test/googletest-catch-exceptions-test_.cc)
+  endif()
+
+  cxx_executable_with_flags(
+    googletest-catch-exceptions-ex-test_
+    "${cxx_exception}"
+    gtest_main
+    test/googletest-catch-exceptions-test_.cc)
+  py_test(googletest-catch-exceptions-test)
+
+  cxx_executable(googletest-color-test_ test gtest)
+  py_test(googletest-color-test)
+
+  cxx_executable(googletest-env-var-test_ test gtest)
+  py_test(googletest-env-var-test)
+
+  cxx_executable(googletest-filter-unittest_ test gtest)
+  py_test(googletest-filter-unittest)
+
+  cxx_executable(gtest_help_test_ test gtest_main)
+  py_test(gtest_help_test)
+
+  cxx_executable(googletest-list-tests-unittest_ test gtest)
+  py_test(googletest-list-tests-unittest)
+
+  cxx_executable(googletest-output-test_ test gtest)
+  py_test(googletest-output-test --no_stacktrace_support)
+
+  cxx_executable(googletest-shuffle-test_ test gtest)
+  py_test(googletest-shuffle-test)
+
+  # MSVC 7.1 does not support STL with exceptions disabled.
+  if (NOT MSVC OR MSVC_VERSION GREATER 1310)
+    cxx_executable(googletest-throw-on-failure-test_ test gtest_no_exception)
+    set_target_properties(googletest-throw-on-failure-test_
+      PROPERTIES
+      COMPILE_FLAGS "${cxx_no_exception}")
+    py_test(googletest-throw-on-failure-test)
+  endif()
+
+  cxx_executable(googletest-uninitialized-test_ test gtest)
+  py_test(googletest-uninitialized-test)
+
+  cxx_executable(gtest_xml_outfile1_test_ test gtest_main)
+  cxx_executable(gtest_xml_outfile2_test_ test gtest_main)
+  py_test(gtest_xml_outfiles_test)
+  py_test(googletest-json-outfiles-test)
+
+  cxx_executable(gtest_xml_output_unittest_ test gtest)
+  py_test(gtest_xml_output_unittest --no_stacktrace_support)
+  py_test(googletest-json-output-unittest --no_stacktrace_support)
+endif()

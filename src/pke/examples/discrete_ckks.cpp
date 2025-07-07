@@ -2,7 +2,7 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-07-03 21:55:24
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-07-07 16:04:48
+ * @LastEditTime: 2025-07-07 21:49:37
  * @FilePath: \openfhe-development\src\pke\examples\discrete_ckks.cpp
  * @Description: 用于实现离散CKKS的示例代码
  * 

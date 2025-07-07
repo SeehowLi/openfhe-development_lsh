@@ -423,7 +423,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
     }
 
     uint32_t slots = ciphertext->GetSlots();
-
+    // 预计算的传递
     auto pair = m_bootPrecomMap.find(slots);
     if (pair == m_bootPrecomMap.end()) {
         std::string errorMsg(std::string("Precomputations for ") + std::to_string(slots) +
@@ -760,15 +760,19 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
 //------------------------------------------------------------------------------
 Ciphertext<DCRTPoly> FHECKKSRNS::EvalStC(ConstCiphertext<DCRTPoly> ciphertext) const {
     
-    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
-    if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
-        OPENFHE_THROW("CKKS Bootstrapping is only supported for the Hybrid key switching method.");
-#if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
-    if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO || cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
-        OPENFHE_THROW("128-bit CKKS Bootstrapping is supported for FIXEDMANUAL and FIXEDAUTO methods only.");
-#endif
-    auto cc        = ciphertext->GetCryptoContext();
+//     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
+//     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
+//         OPENFHE_THROW("CKKS Bootstrapping is only supported for the Hybrid key switching method.");
+// #if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
+//     if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO || cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
+//         OPENFHE_THROW("128-bit CKKS Bootstrapping is supported for FIXEDMANUAL and FIXEDAUTO methods only.");
+// #endif
+    // auto cc        = ciphertext->GetCryptoContext();
     uint32_t slots = ciphertext->GetSlots();
+
+    // auto algo = cc->GetScheme();
+    Ciphertext<DCRTPoly> ct = ciphertext->Clone();
+    // algo->ModReduceInternalInPlace(ct, BASE_NUM_LEVELS_TO_DROP);
 
     auto pair = m_bootPrecomMap.find(slots);
     if (pair == m_bootPrecomMap.end()) {
@@ -783,20 +787,12 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalStC(ConstCiphertext<DCRTPoly> ciphertext) c
     bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
                          (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
     if (isLTBootstrap) {
-    // 线性变换模式：使用预计算的线性变换矩阵
-    if (precom->m_U0Pre.empty()) {
-        OPENFHE_THROW("Linear transform matrix for decoding is empty. Please regenerate precomputations.");
-    }
         // 调用线性变换
-        return EvalLinearTransform(precom->m_U0Pre, ciphertext);
+        return EvalLinearTransform(precom->m_U0Pre, ct);
     } else {
         // FFT模式：使用预计算的FFT变换矩阵
-        if (precom->m_U0PreFFT.empty()) {
-            OPENFHE_THROW("FFT transform matrix for decoding is empty. Please regenerate precomputations.");
-        }
-        
         // 调用SlotsToCoeffs变换
-        return EvalSlotsToCoeffs(precom->m_U0PreFFT, ciphertext);
+        return EvalSlotsToCoeffs(precom->m_U0PreFFT, ct);
     }
 }
 
@@ -1964,6 +1960,12 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
         OPENFHE_THROW(errorMsg);
     }
 
+    // 添加调试信息
+    std::cout << "DEBUG: A.size() = " << A.size() << std::endl;
+    if (!A.empty()) {
+        std::cout << "DEBUG: A[0].size() = " << A[0].size() << std::endl;
+    }
+
     const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;//只获取预计算的参数
 
     auto cc = ctxt->GetCryptoContext();//获取加密上下文(context)，即加密的各种信息，cc是一个容器
@@ -2033,6 +2035,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
             rot_out[s][i] = ReduceRotation((gRem * i) * (1 << (s * layersCollapse)), M / 4);
         }
     }
+    // std::cout << "stage #1!" << std::endl;
 
     //  No need for Encrypted Bit Reverse
     Ciphertext<DCRTPoly> result = ctxt->Clone();
@@ -2046,6 +2049,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
         // computes the NTTs for each CRT limb (for the hoisted automorphisms used later on)
         // 预计算NTT以支持后续的快速旋转操作
         auto digits = cc->EvalFastRotationPrecompute(result);
+
         // 这是一个密文向量，用于存储快速旋转的结果
         std::vector<Ciphertext<DCRTPoly>> fastRotation(g);
 #pragma omp parallel for //OpenMP并行计算
@@ -2066,6 +2070,23 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
             Ciphertext<DCRTPoly> inner;//内层累加器
             // for the first iteration with j=0:
             int32_t G = g * i;
+            std::cout << "G:" << (b-1)*g << std::endl;
+            // std::cout << "A[s][G]" << A[s][G] << std::endl;
+            // 这里出现段错误
+            std::cout << "DEBUG: Before EvalMultExt" << std::endl;
+            std::cout << "  s = " << s << ", G = " << G << std::endl;
+            std::cout << "  fastRotation[0] is null? " << (fastRotation[0] == nullptr) << std::endl;
+            if (fastRotation[0]) {
+                std::cout << "  fastRotation[0] elements size: " << fastRotation[0]->GetElements().size() << std::endl;
+            }
+            std::cout << "  A[s][G] is null? " << (A[s][G] == nullptr) << std::endl;
+
+            // 检查所有 fastRotation 元素
+            for (int32_t j = 0; j < g; j++) {
+                if (!fastRotation[j]) {
+                    std::cout << "ERROR: fastRotation[" << j << "] is null!" << std::endl;
+                }
+            }
             inner     = EvalMultExt(fastRotation[0], A[s][G]);
             // continue the loop
             for (int32_t j = 1; j < g; j++) {
@@ -2106,7 +2127,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalSlotsToCoeffs(const std::vector<std::vector
         std::vector<DCRTPoly>& elements = result->GetElements();
         elements[0] += first;
     }
-
+    std::cout << "stage #2!" << std::endl;
     if (flagRem) {
         algo->ModReduceInternalInPlace(result, BASE_NUM_LEVELS_TO_DROP);
         // computes the NTTs for each CRT limb (for the hoisted automorphisms used later on)

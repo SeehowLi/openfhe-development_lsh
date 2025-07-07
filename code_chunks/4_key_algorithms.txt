@@ -1,0 +1,112 @@
+====== KEY OPENFHE ALGORITHMS ======
+
+=== Files containing 'BGV' ===
+./openfhe_origine_examples/benchmark/compare-bfvrns-vs-bgvrns.cpp
+./openfhe_origine_examples/benchmark/lib-benchmark.cpp
+./openfhe_origine_examples/benchmark/mult-vs-square.cpp
+./openfhe_origine_examples/pke_examples/ckks-noise-flooding.cpp
+./openfhe_origine_examples/pke_examples/depth-bgvrns.cpp
+./openfhe_origine_examples/pke_examples/pre-hra-secure.cpp
+./openfhe_origine_examples/pke_examples/simple-integers-bgvrns.cpp
+./openfhe_origine_examples/pke_examples/simple-integers-serial-bgvrns.cpp
+./openfhe_origine_examples/pke_examples/threshold-fhe-5p.cpp
+./openfhe_origine_examples/pke_examples/threshold-fhe.cpp
+
+=== Files containing 'BFV' ===
+./openfhe_origine_examples/benchmark/bfv-mult-method-benchmark.cpp
+./openfhe_origine_examples/benchmark/compare-bfv-hps-leveled-vs-behz.cpp
+./openfhe_origine_examples/benchmark/compare-bfvrns-vs-bgvrns.cpp
+./openfhe_origine_examples/benchmark/lib-benchmark.cpp
+./openfhe_origine_examples/benchmark/mult-vs-square.cpp
+./openfhe_origine_examples/pke_examples/ckks-noise-flooding.cpp
+./openfhe_origine_examples/pke_examples/depth-bfvrns-behz.cpp
+./openfhe_origine_examples/pke_examples/depth-bfvrns.cpp
+./openfhe_origine_examples/pke_examples/inner-product.cpp
+./openfhe_origine_examples/pke_examples/pre-buffer.cpp
+
+=== Files containing 'CKKS' ===
+./benchmark/src/serialize-ckks.cpp
+./lsh/test/softmax_eval.cpp
+./openfhe_origine_examples/benchmark/lib-benchmark.cpp
+./openfhe_origine_examples/benchmark/mult-vs-square.cpp
+./openfhe_origine_examples/binfhe_examples/eval-decomp.cpp
+./openfhe_origine_examples/binfhe_examples/eval-sign.cpp
+./openfhe_origine_examples/pke_examples/ckks-noise-flooding.cpp
+./openfhe_origine_examples/pke_examples/inner-product.cpp
+./openfhe_origine_examples/pke_examples/iterative-ckks-bootstrapping.cpp
+./openfhe_origine_examples/pke_examples/linearwsum-evaluation.cpp
+
+=== Files containing 'TFHE' ===
+./src/core/include/lattice/constants-lattice.h
+
+=== Files containing 'scheme' ===
+./benchmark/src/serialize-ckks.cpp
+./openfhe_origine_examples/benchmark/bfv-mult-method-benchmark.cpp
+./openfhe_origine_examples/benchmark/compare-bfv-hps-leveled-vs-behz.cpp
+./openfhe_origine_examples/benchmark/compare-bfvrns-vs-bgvrns.cpp
+./openfhe_origine_examples/benchmark/lib-benchmark.cpp
+./openfhe_origine_examples/benchmark/mult-vs-square.cpp
+./openfhe_origine_examples/binfhe_examples/boolean-lmkcdey.cpp
+./openfhe_origine_examples/binfhe_examples/boolean-multi-input.cpp
+./openfhe_origine_examples/binfhe_examples/boolean-truth-tables.cpp
+./openfhe_origine_examples/binfhe_examples/boolean.cpp
+
+=== Files containing 'crypto' ===
+./benchmark/src/poly-benchmark.h
+./benchmark/src/serialize-ckks.cpp
+./benchmark/src/VectorMath.cpp
+./lsh/test/softmax_eval.cpp
+./openfhe_origine_examples/benchmark/bfv-mult-method-benchmark.cpp
+./openfhe_origine_examples/benchmark/binfhe-ap-pke.cpp
+./openfhe_origine_examples/benchmark/binfhe-ap.cpp
+./openfhe_origine_examples/benchmark/binfhe-ginx-pke.cpp
+./openfhe_origine_examples/benchmark/binfhe-ginx.cpp
+./openfhe_origine_examples/benchmark/binfhe-lmkcdey.cpp
+
+=== Files containing 'lattice' ===
+./benchmark/src/poly-benchmark.h
+./openfhe_origine_examples/benchmark/IntegerMath.cpp
+./openfhe_origine_examples/benchmark/Lattice.cpp
+./openfhe_origine_examples/benchmark/NbTheory.cpp
+./openfhe_origine_examples/pke_examples/scheme-switching.cpp
+./src/binfhe/include/binfhe-base-params.h
+./src/binfhe/include/binfhe-constants.h
+./src/binfhe/include/binfhecontext.h
+./src/binfhe/include/lwe-cryptoparameters.h
+./src/binfhe/include/lwe-pke.h
+
+=== Files containing 'encrypt' ===
+./openfhe_origine_examples/binfhe_examples/boolean-lmkcdey.cpp
+./openfhe_origine_examples/binfhe_examples/boolean-multi-input.cpp
+./openfhe_origine_examples/binfhe_examples/boolean-serial-binary-dynamic-large-precision.cpp
+./openfhe_origine_examples/binfhe_examples/boolean-serial-json-dynamic-large-precision.cpp
+./openfhe_origine_examples/binfhe_examples/boolean.cpp
+./openfhe_origine_examples/binfhe_examples/eval-sign.cpp
+./openfhe_origine_examples/binfhe_examples/pke/boolean-pke.cpp
+./openfhe_origine_examples/pke_examples/ckks-noise-flooding.cpp
+./openfhe_origine_examples/pke_examples/depth-bfvrns-behz.cpp
+./openfhe_origine_examples/pke_examples/depth-bfvrns.cpp
+
+=== Files containing 'decrypt' ===
+./openfhe_origine_examples/binfhe_examples/eval-function.cpp
+./openfhe_origine_examples/binfhe_examples/eval-sign.cpp
+./openfhe_origine_examples/binfhe_examples/pke/boolean-pke.cpp
+./openfhe_origine_examples/binfhe_examples/pke/eval-function-pke.cpp
+./openfhe_origine_examples/pke_examples/ckks-noise-flooding.cpp
+./openfhe_origine_examples/pke_examples/scheme-switching-serial.cpp
+./openfhe_origine_examples/pke_examples/scheme-switching.cpp
+./openfhe_origine_examples/pke_examples/simple-real-numbers-serial.cpp
+./openfhe_origine_examples/pke_examples/tckks-interactive-mp-bootstrapping-Chebyshev.cpp
+./openfhe_origine_examples/pke_examples/tckks-interactive-mp-bootstrapping.cpp
+
+=== Files containing 'key' ===
+./lsh/test/softmax_eval.cpp
+./openfhe_origine_examples/benchmark/bfv-mult-method-benchmark.cpp
+./openfhe_origine_examples/benchmark/binfhe-ap.cpp
+./openfhe_origine_examples/benchmark/binfhe-ginx.cpp
+./openfhe_origine_examples/benchmark/binfhe-lmkcdey.cpp
+./openfhe_origine_examples/benchmark/compare-bfv-hps-leveled-vs-behz.cpp
+./openfhe_origine_examples/benchmark/compare-bfvrns-vs-bgvrns.cpp
+./openfhe_origine_examples/benchmark/lib-benchmark.cpp
+./openfhe_origine_examples/benchmark/mult-vs-square.cpp
+./openfhe_origine_examples/binfhe_examples/boolean-lmkcdey.cpp
