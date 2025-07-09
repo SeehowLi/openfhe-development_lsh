@@ -59,12 +59,15 @@ namespace lbcrypto {
 // Bootstrap Wrapper -- 自举封装
 //------------------------------------------------------------------------------
 
-void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
-                                    std::vector<uint32_t> dim1, uint32_t numSlots, uint32_t correctionFactor,
+void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, 
+                                    std::vector<uint32_t> levelBudget,
+                                    std::vector<uint32_t> dim1, // bsgs的维度参数
+                                    uint32_t numSlots, 
+                                    uint32_t correctionFactor, //矫正因子.用于精度控制
                                     bool precompute) {
-    //局部参数
+    // 局部参数
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
-
+    // ckks自举支支持hybrid模式                                    
     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
         OPENFHE_THROW("CKKS Bootstrapping is only supported for the Hybrid key switching method.");
 #if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
@@ -77,7 +80,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
     uint32_t slots = (numSlots == 0) ? M / 4 : numSlots;
 
     // Set correction factor by default, if it is not already set.-- 校正因子
-    // correctionFactor应该是用来纠正缩放因子，保证精度的
+    // TODO:correctionFactor应该是用来纠正缩放因子，保证精度的,目前他的作用我还没搞清楚
     if (correctionFactor == 0) {
         if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO ||
             cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT) {
@@ -100,10 +103,10 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
     else {
         m_correctionFactor = correctionFactor;
     }
-
+    // 生成一个预计算的字典,每一个slot都是对应的预计算值,便于快速查找
     m_bootPrecomMap[slots]                      = std::make_shared<CKKSBootstrapPrecom>();
     std::shared_ptr<CKKSBootstrapPrecom> precom = m_bootPrecomMap[slots];
-
+    // precom是预计算的核心结构体
     precom->m_slots = slots;
     precom->m_dim1  = dim1[0];
 
@@ -114,7 +117,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
     }
 
     // Perform some checks on the level budget and compute parameters
-    //levelbudget--StC和CtS所消耗的层级，不能太大也不能太小
+    // levelbudget--StC和CtS所消耗的层级，不能太大也不能太小
     std::vector<uint32_t> newBudget = levelBudget;
 
     if (newBudget[0] > logSlots) {
@@ -135,17 +138,21 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         newBudget[1] = 1;
     }
     // 分别预计算StC和CtS的参数
+    // TODO:参数和矩阵有啥区别呢?参数里面具体什么?--FFT变换的元参数
+    // 包括:层级预算、层级压缩数目、bs、gs、旋转次数等
     precom->m_paramsEnc = GetCollapsedFFTParams(slots, newBudget[0], dim1[0]);
     precom->m_paramsDec = GetCollapsedFFTParams(slots, newBudget[1], dim1[1]);
 
-    // 预计算
+    // 预计算--重点!
     if (precompute) {
         uint32_t m    = 4 * slots;
-        bool isSparse = (M != m) ? true : false;//判断是否稀疏
+        // 稀疏与全打包的计算模式不一样
+        bool isSparse = (M != m) ? true : false;// 判断是否稀疏
 //======================================  矩阵预计算 ======================================//
-        // computes indices for all primitive roots of unity--这一段和HEAAN的预计算矩阵基本一样
+        // computes indices for all primitive roots of unity--这一段和HEaaN的预计算矩阵基本一样
         std::vector<uint32_t> rotGroup(slots);//预计算的矩阵，用于后面的旋转计算
         // 5^i mod m
+        // 5的幂次是用于旋转计算的索引
         uint32_t fivePows = 1;
         for (uint32_t i = 0; i < slots; ++i) {
             rotGroup[i] = fivePows;
@@ -154,6 +161,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         }
 
         // computes all powers of a primitive root of unity exp(2 * M_PI/m)
+        // 计算所有本源单位根
         std::vector<std::complex<double>> ksiPows(m + 1);
         for (uint32_t j = 0; j < m; ++j) {
             double angle = 2.0 * M_PI * j / m;
@@ -165,29 +173,35 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
 
         // Extract the modulus prior to bootstrapping -- 在自举之前提取模数
         //底层模式or此时模数？--这里的模数是指密文的模数吗？--是的
+        // 这个q应该是对底层的那个模数（也是最大的那个）
         NativeInteger q = cryptoParams->GetElementParams()->GetParams()[0]->GetModulus().ConvertToInt();
-        double qDouble  = q.ConvertToDouble();
+        double qDouble  = q.ConvertToDouble();// 转换类型为double
         //factor是离q最近的2的整数次幂
         uint128_t factor = ((uint128_t)1 << ((uint32_t)std::round(std::log2(qDouble))));
         double pre       = qDouble / factor;
+        // TODO:k是什么?
+        // 补偿不同密钥分布对安全性和精度的影响，目前还不清楚这是什么。不过可以看出稀疏密钥需要补偿，不稀疏的时候不需要
         double k         = (cryptoParams->GetSecretKeyDist() == SPARSE_TERNARY) ? K_SPARSE : 1.0;
-        double scaleEnc  = pre / k;//？
-        double scaleDec  = 1 / pre;//？
+        double scaleEnc  = pre / k;// 解码缩放因子？
+        double scaleDec  = 1 / pre;// 编码缩放因子？
         //模约简所需要的depth
         uint32_t approxModDepth = GetModDepthInternal(cryptoParams->GetSecretKeyDist());
-        //bts所需要的深度--这里是不是说明encode和decode指的是CTS/STC？
+        //bts所需要的深度--包括模约简+StC+CtS,实际上已经是BTS所需要的全部depth了
         uint32_t depthBT        = approxModDepth + precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] +
                            precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET];
 
-        // compute # of levels to remain when encoding the coefficients--CTS？？？
-        // 计算初始模数链的总长度(模数层级的数量)
+        // compute # of levels to remain when encoding the coefficients
+        // 计算初始模数链的总长度(模数层级的数量);总的CRT数量
         uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size();
         // for FLEXIBLEAUTOEXT we do not need extra modulus in auxiliary plaintexts
         if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
             L0 -= 1;
-        uint32_t lEnc = L0 - precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] - 1;//为什么要减去1？？？
+        // 用于CtS。这个层级是目标层级，变换完之后的层级
+        // 为什么要减去1?--不清楚。。。
+        uint32_t lEnc = L0 - precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] - 1;
+        // 用于StC
         uint32_t lDec = L0 - depthBT;
-        //判断是否线性变换LinerTrans
+        //判断是否采用何种方式,根据层级预算来判断
         bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
                              (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
 
@@ -207,11 +221,11 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
                 }
             }
 
-            if (!isSparse) {//不稀疏--为什么只要一半呢？--难道是可以通过U0计算出来？
+            if (!isSparse) {// 不稀疏--为什么只要一半呢？--难道是可以通过U0计算出来？
                 precom->m_U0hatTPre = EvalLinearTransformPrecompute(cc, U0hatT, scaleEnc, lEnc);
                 precom->m_U0Pre     = EvalLinearTransformPrecompute(cc, U0, scaleDec, lDec);
             }
-            else {//稀疏
+            else {// 稀疏
                 precom->m_U0hatTPre = EvalLinearTransformPrecompute(cc, U0hatT, U1hatT, 0, scaleEnc, lEnc);
                 precom->m_U0Pre     = EvalLinearTransformPrecompute(cc, U0, U1, 1, scaleDec, lDec);
             }
@@ -755,9 +769,146 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
     return ctxtDec;
 }
 
+
 //------------------------------------------------------------------------------
 // 新增：直接调用的Slots-to-Coefficients和Coefficients-to-Slots方法
 //------------------------------------------------------------------------------
+
+// 根据不同层级预计算参数，需要slots和level匹配，targetLevel是现在的层级
+void FHECKKSRNS::EvalLinearTransformPrecomputeForLevel(const CryptoContextImpl<DCRTPoly>& cc,
+                                                       uint32_t slots,
+                                                       uint32_t targetLevel,
+                                                       const std::vector<uint32_t>& levelBudget,
+                                                       const std::vector<uint32_t>& dim1) {
+    // 创建层级-槽位的唯一键
+    auto key = std::make_pair(slots, targetLevel);
+    
+    // 如果已经存在，直接返回
+    if (m_linearTransformPrecomMap.find(key) != m_linearTransformPrecomMap.end()) {
+        return;
+    }
+    
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
+    
+    // 创建新的线性变换预计算对象
+    m_linearTransformPrecomMap[key] = std::make_shared<CKKSLinearTransformPrecom>();
+    auto ltPrecom = m_linearTransformPrecomMap[key];
+    ltPrecom->m_slots = slots;
+    ltPrecom->m_level = targetLevel;
+    
+    // 修正：使用 dim1[0] 作为编码的维度参数
+    ltPrecom->m_dim1 = (dim1.empty() || dim1[0] == 0) ? static_cast<uint32_t>(ceil(sqrt(slots))) : dim1[0];
+    
+    uint32_t logSlots = std::log2(slots);
+    if (logSlots == 0) {
+        logSlots = 1;
+    }
+
+    std::vector<uint32_t> newBudget = levelBudget;
+
+    if (newBudget[0] > logSlots) {
+        std::cerr << "\nWarning, the level budget for encoding is too large. Setting it to " << logSlots << std::endl;
+        newBudget[0] = logSlots;
+    }
+    if (newBudget[0] < 1) {
+        std::cerr << "\nWarning, the level budget for encoding can not be zero. Setting it to 1" << std::endl;
+        newBudget[0] = 1;
+    }
+
+    if (newBudget[1] > logSlots) {
+        std::cerr << "\nWarning, the level budget for decoding is too large. Setting it to " << logSlots << std::endl;
+        newBudget[1] = logSlots;
+    }
+    if (newBudget[1] < 1) {
+        std::cerr << "\nWarning, the level budget for decoding can not be zero. Setting it to 1" << std::endl;
+        newBudget[1] = 1;
+    }
+    // 使用正确的维度参数计算FFT参数
+    ltPrecom->m_paramsEnc = GetCollapsedFFTParams(slots, levelBudget[0], dim1[0]);
+    ltPrecom->m_paramsDec = GetCollapsedFFTParams(slots, levelBudget[1], dim1[1]);
+    
+        // 计算缩放因子（针对目标层级）
+    // 获取当前的RNS参数
+    auto elementParams = *(cryptoParams->GetElementParams());
+    // L0是总的RNS数量，同bts
+    uint32_t L0 = elementParams.GetParams().size();
+    // for FLEXIBLEAUTOEXT we do not need extra modulus in auxiliary plaintexts
+    if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
+        L0 -= 1;
+    
+    // 调整到目标层级，舍弃掉多余的RNS limb
+    // 是否需要？往后看一下，先不管RNS基，只关注层级
+    // for (uint32_t i = 0; i < (L0 - targetLevel - 1); i++) {
+    //     elementParams.PopLastParam();
+    // }
+
+    // 完全同bts里面的计算
+    NativeInteger q = elementParams.GetParams()[0]->GetModulus().ConvertToInt();
+    double qDouble = q.ConvertToDouble();
+    uint128_t factor = ((uint128_t)1 << ((uint32_t)std::round(std::log2(qDouble))));
+    double pre = qDouble / factor;
+    double k = (cryptoParams->GetSecretKeyDist() == SPARSE_TERNARY) ? K_SPARSE : 1.0;
+    double scaleEnc = pre / k;
+    double scaleDec = 1 / pre;
+
+    // 目标层级
+    uint32_t lStC = targetLevel - ltPrecom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET];
+    uint32_t lCtS = targetLevel - ltPrecom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET];
+
+    // 生成旋转组和Ksi幂次
+    uint32_t m = 4 * slots;
+    bool isSparse = (cc.GetCyclotomicOrder() != m);
+    
+    std::vector<uint32_t> rotGroup(slots);
+    uint32_t fivePows = 1;
+    for (uint32_t i = 0; i < slots; ++i) {
+        rotGroup[i] = fivePows;
+        fivePows *= 5;
+        fivePows %= m;
+    }
+    
+    std::vector<std::complex<double>> ksiPows(m + 1);
+    for (uint32_t j = 0; j < m; ++j) {
+        double angle = 2.0 * M_PI * j / m;
+        ksiPows[j] = std::complex<double>(cos(angle), sin(angle));
+    }
+    ksiPows[m] = ksiPows[0];
+
+    // 判断变换模式
+    bool isLTBootstrap = (ltPrecom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
+                         (ltPrecom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
+    
+    // 根据模式生成预计算矩阵
+    if (isLTBootstrap) {
+        // 线性变换模式：生成变换矩阵
+        std::vector<std::vector<std::complex<double>>> U0(slots, std::vector<std::complex<double>>(slots));
+        std::vector<std::vector<std::complex<double>>> U0hatT(slots, std::vector<std::complex<double>>(slots));
+        std::vector<std::vector<std::complex<double>>> U1(slots, std::vector<std::complex<double>>(slots));
+        std::vector<std::vector<std::complex<double>>> U1hatT(slots, std::vector<std::complex<double>>(slots));
+        
+        for (size_t i = 0; i < slots; i++) {
+            for (size_t j = 0; j < slots; j++) {
+                U0[i][j] = ksiPows[(j * rotGroup[i]) % m];
+                U0hatT[j][i] = std::conj(U0[i][j]);
+                U1[i][j] = std::complex<double>(0, 1) * U0[i][j];
+                U1hatT[j][i] = std::conj(U1[i][j]);
+            }
+        }
+        
+        if (!isSparse) {
+            ltPrecom->m_U0hatTPre = EvalLinearTransformPrecompute(cc, U0hatT, scaleEnc, lCtS);
+            ltPrecom->m_U0Pre = EvalLinearTransformPrecompute(cc, U0, scaleDec, lStC);
+        } else {
+            ltPrecom->m_U0hatTPre = EvalLinearTransformPrecompute(cc, U0hatT, U1hatT, 0, scaleEnc, lCtS);
+            ltPrecom->m_U0Pre = EvalLinearTransformPrecompute(cc, U0, U1, 1, scaleDec, lStC);
+        }
+    } else {
+        // FFT模式：生成分层FFT矩阵
+        ltPrecom->m_U0hatTPreFFT = EvalCoeffsToSlotsPrecompute(cc, ksiPows, rotGroup, false, scaleEnc, lCtS);
+        ltPrecom->m_U0PreFFT = EvalSlotsToCoeffsPrecompute(cc, ksiPows, rotGroup, false, scaleDec, lStC);
+    }
+}
+
 Ciphertext<DCRTPoly> FHECKKSRNS::EvalStC(ConstCiphertext<DCRTPoly> ciphertext) const {
     
 //     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());

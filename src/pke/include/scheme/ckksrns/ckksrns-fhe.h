@@ -54,7 +54,7 @@ namespace lbcrypto {
 class CKKSBootstrapPrecom {
 public:
     CKKSBootstrapPrecom() {}
-
+    
     CKKSBootstrapPrecom(const CKKSBootstrapPrecom& rhs) {
         m_dim1         = rhs.m_dim1;
         m_slots        = rhs.m_slots;
@@ -131,6 +131,113 @@ public:
     }
 };
 
+/**
+ * 存储线性变换（StC和CtS）的预计算数据
+ * 用于为不同层级的密文提供专门的预计算矩阵
+ * @author: Seehow Li
+ */
+class CKKSLinearTransformPrecom {
+public:
+    CKKSLinearTransformPrecom() {}
+    
+    CKKSLinearTransformPrecom(const CKKSLinearTransformPrecom& rhs) {
+        m_dim1         = rhs.m_dim1;
+        m_slots        = rhs.m_slots;
+        m_level        = rhs.m_level;
+        m_paramsEnc    = rhs.m_paramsEnc;
+        m_paramsDec    = rhs.m_paramsDec;
+        m_U0Pre        = rhs.m_U0Pre;
+        m_U0hatTPre    = rhs.m_U0hatTPre;
+        m_U0PreFFT     = rhs.m_U0PreFFT;
+        m_U0hatTPreFFT = rhs.m_U0hatTPreFFT;
+    }
+
+    CKKSLinearTransformPrecom(CKKSLinearTransformPrecom&& rhs) {
+        m_dim1         = rhs.m_dim1;
+        m_slots        = rhs.m_slots;
+        m_level        = rhs.m_level;
+        m_paramsEnc    = std::move(rhs.m_paramsEnc);
+        m_paramsDec    = std::move(rhs.m_paramsDec);
+        m_U0Pre        = std::move(rhs.m_U0Pre);
+        m_U0hatTPre    = std::move(rhs.m_U0hatTPre);
+        m_U0PreFFT     = std::move(rhs.m_U0PreFFT);
+        m_U0hatTPreFFT = std::move(rhs.m_U0hatTPreFFT);
+    }
+
+    virtual ~CKKSLinearTransformPrecom() {}
+
+    // ====================================================================================
+    // 基本参数（对应 CKKSBootstrapPrecom 的 m_dim1 和 m_slots）
+    // ====================================================================================
+    
+    // the inner dimension in the baby-step giant-step strategy (对应编码操作)
+    uint32_t m_dim1 = 0;
+
+    // number of slots for which the linear transform is performed
+    uint32_t m_slots = 0;
+
+    // target level for the linear transform operations
+    // 默认给个8，怕报错
+    uint32_t m_level = 8;
+
+    // ====================================================================================
+    // FFT参数（对应 CKKSBootstrapPrecom 的 m_paramsEnc 和 m_paramsDec）
+    // ====================================================================================
+    std::vector<int32_t> m_paramsEnc = std::vector<int32_t>(CKKS_BOOT_PARAMS::TOTAL_ELEMENTS, 0);
+
+    std::vector<int32_t> m_paramsDec = std::vector<int32_t>(CKKS_BOOT_PARAMS::TOTAL_ELEMENTS, 0);
+
+    // ====================================================================================
+    // 预计算矩阵（对应 CKKSBootstrapPrecom 的预计算矩阵）
+    // ====================================================================================
+
+    // Linear map U0; used in SlotsToCoeffs (decoding)
+    std::vector<ConstPlaintext> m_U0Pre;
+
+    // Conj(U0^T); used in CoeffsToSlots (encoding)
+    std::vector<ConstPlaintext> m_U0hatTPre;
+
+    // coefficients corresponding to U0; used in SlotsToCoeffs (decoding)
+    std::vector<std::vector<ConstPlaintext>> m_U0PreFFT;
+
+    // coefficients corresponding to conj(U0^T); used in CoeffsToSlots (encoding)
+    std::vector<std::vector<ConstPlaintext>> m_U0hatTPreFFT;
+
+    // ====================================================================================
+    // 序列化函数（对应 CKKSBootstrapPrecom 的序列化）
+    // ====================================================================================
+
+    // template <class Archive>
+    // void save(Archive& ar) const {
+    //     ar(cereal::make_nvp("dim1_Enc", m_dim1));
+    //     ar(cereal::make_nvp("dim1_Dec", m_paramsDec[CKKS_BOOT_PARAMS::GIANT_STEP]));
+    //     ar(cereal::make_nvp("slots", m_slots));
+    //     ar(cereal::make_nvp("level", m_level));
+    //     ar(cereal::make_nvp("lCtS", m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET]));
+    //     ar(cereal::make_nvp("lStC", m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET]));
+    //     // 注意：预计算矩阵不序列化以节省空间和时间
+    //     // ar(cereal::make_nvp("U0Pre", m_U0Pre));
+    //     // ar(cereal::make_nvp("U0hatTPre", m_U0hatTPre));
+    //     // ar(cereal::make_nvp("U0PreFFT", m_U0PreFFT));
+    //     // ar(cereal::make_nvp("U0hatTPreFFT", m_U0hatTPreFFT));
+    // }
+
+    // template <class Archive>
+    // void load(Archive& ar) {
+    //     ar(cereal::make_nvp("dim1_Enc", m_dim1));
+    //     ar(cereal::make_nvp("dim1_Dec", m_paramsDec[CKKS_BOOT_PARAMS::GIANT_STEP]));
+    //     ar(cereal::make_nvp("slots", m_slots));
+    //     ar(cereal::make_nvp("level", m_level));
+    //     ar(cereal::make_nvp("lCtS", m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET]));
+    //     ar(cereal::make_nvp("lStC", m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET]));
+    //     // 预计算矩阵在加载时需要重新生成
+    //     // ar(cereal::make_nvp("U0Pre", m_U0Pre));
+    //     // ar(cereal::make_nvp("U0hatTPre", m_U0hatTPre));
+    //     // ar(cereal::make_nvp("U0PreFFT", m_U0PreFFT));
+    //     // ar(cereal::make_nvp("U0hatTPreFFT", m_U0hatTPreFFT));
+    // }
+};
+
 class FHECKKSRNS : public FHERNS {
     using ParmType = typename DCRTPoly::Params;
 
@@ -159,6 +266,7 @@ public:
      * 直接执行Slots-to-Coefficients变换，可以直接调用
      * @param ciphertext 输入密文
      * @return 变换后的密文
+     * @author: Seehow Li
      */
     Ciphertext<DCRTPoly> EvalStC(ConstCiphertext<DCRTPoly> ciphertext) const override;  
 
@@ -166,6 +274,7 @@ public:
      * 直接执行Coefficients-to-Slots变换的便捷方法，可以直接调用
      * @param ciphertext 输入密文
      * @return 变换后的密文
+     * @author: Seehow Li
      */
     Ciphertext<DCRTPoly> EvalCtS(ConstCiphertext<DCRTPoly> ciphertext) const override;                                       
 
@@ -219,6 +328,18 @@ public:
     Ciphertext<DCRTPoly> EvalSlotsToCoeffs(const std::vector<std::vector<ConstPlaintext>>& A,
                                            ConstCiphertext<DCRTPoly> ctxt) const;
 
+    /**
+     * @brief: 为特定层级生成线性变换预计算的辅助方法
+     * @param cc: 加密上下文
+     * @param slots: 槽位数
+     * @param targetLevel: 目标层级
+     * @author: Seehow Li
+     */
+    void EvalLinearTransformPrecomputeForLevel(const CryptoContextImpl<DCRTPoly>& cc,
+                                               uint32_t slots,
+                                               uint32_t targetLevel,
+                                               const std::vector<uint32_t>& levelBudget,
+                                               const std::vector<uint32_t>& dim1);
     //------------------------------------------------------------------------------
     // SERIALIZATION
     //------------------------------------------------------------------------------
@@ -227,6 +348,8 @@ public:
     void save(Archive& ar) const {
         ar(cereal::base_class<FHERNS>(this));
         ar(cereal::make_nvp("paramMap", m_bootPrecomMap));
+        // 新增
+        // ar(cereal::make_nvp("linearTransformMap", m_linearTransformPrecomMap));  
         ar(cereal::make_nvp("corFactor", m_correctionFactor));
     }
 
@@ -234,6 +357,8 @@ public:
     void load(Archive& ar) {
         ar(cereal::base_class<FHERNS>(this));
         ar(cereal::make_nvp("paramMap", m_bootPrecomMap));
+        // 新增
+        // ar(cereal::make_nvp("linearTransformMap", m_linearTransformPrecomMap));  
         ar(cereal::make_nvp("corFactor", m_correctionFactor));
     }
 
@@ -307,6 +432,13 @@ private:
     // key tuple is dim1, levelBudgetEnc, levelBudgetDec
     std::map<uint32_t, std::shared_ptr<CKKSBootstrapPrecom>> m_bootPrecomMap;
 
+    /**
+     * @brief: 层级感知的线性变换预计算映射
+     * @details: 该映射用于存储不同层级和槽位的线性变换预计算数据
+     * @author:Seehow Li
+     */
+    std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<CKKSLinearTransformPrecom>> m_linearTransformPrecomMap;
+    
     // Chebyshev series coefficients for the SPARSE case
     static const inline std::vector<double> g_coefficientsSparse{
         -0.18646470117093214,   0.036680543700430925,    -0.20323558926782626,     0.029327390306199311,
@@ -350,5 +482,8 @@ private:
 };
 
 }  // namespace lbcrypto
+
+// 注册序列化
+// CEREAL_CLASS_VERSION(lbcrypto::CKKSLinearTransformPrecom, 1);
 
 #endif
