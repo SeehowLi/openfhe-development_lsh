@@ -131,10 +131,24 @@ public:
     }
 
     /**
+   * Defines StC&CtS Precomputation
+   *
+   * @param ciphertext the input ciphertext.
+   * @author Seehow Li
+   */
+    virtual void EvalLinearTransformPrecomputeForLevel(const CryptoContextImpl<Element>& cc, 
+                                                uint32_t slots, uint32_t targetLevel,
+                                                std::vector<uint32_t> levelBudget,
+                                                std::vector<uint32_t> dim1) {
+        OPENFHE_THROW("EvalLinearTransformSetupForLevel is not implemented for this scheme");
+    }
+
+    /**
    * Defines the SlotToCoeff procedure
    *
    * @param ciphertext the input ciphertext.
    * @return the ciphertext after StC.
+   * @author Seehow Li
    */
     virtual Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
         OPENFHE_THROW("EvalStC is not implemented for this scheme");
@@ -145,6 +159,7 @@ public:
    *
    * @param ciphertext the input ciphertext.
    * @return the ciphertext after CtS.
+   * @author Seehow Li
    */
     virtual Ciphertext<Element> EvalCtS(ConstCiphertext<Element> ciphertext) const {
         OPENFHE_THROW("EvalCtS is not implemented for this scheme");

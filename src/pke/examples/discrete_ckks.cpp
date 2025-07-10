@@ -2,7 +2,7 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-07-03 21:55:24
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-07-07 21:49:37
+ * @LastEditTime: 2025-07-10 17:38:54
  * @FilePath: \openfhe-development\src\pke\examples\discrete_ckks.cpp
  * @Description: 用于实现离散CKKS的示例代码
  * 
@@ -11,6 +11,7 @@
 
 #include "openfhe.h"
 #include "scheme/ckksrns/ckksrns-fhe.h"
+#include "scheme/ckksrns/ckksrns-scheme.h"
 using namespace lbcrypto;
 
 void StC_CtS_example();
@@ -80,6 +81,7 @@ void StC_CtS_example() {
     // 预计算参数
     cc->EvalBootstrapSetup(levelBudget, bsgsDim, numSlots);
     std::cout << "Bootstrap Setup is done." << std::endl;
+    
 
     // 生成密钥
     auto keypair = cc->KeyGen();
@@ -103,6 +105,17 @@ void StC_CtS_example() {
     // std::cout << "Ciphertext: " << ct << std::endl;
     std::cout << "Initial number of levels remaining: " << depth - ct->GetLevel() << std::endl;
 
+    uint32_t current_level = ct->GetLevel();
+    std::cout << "Current level is: " << current_level << std::endl;
+    uint32_t current_depth = depth - current_level;
+    std::cout << "Current depth is: " << current_depth << std::endl;
+    
+    // Precompute
+    std::cout << "Start Linear Transform Precomputation..." << std::endl;
+    cc->EvalLinearTransformPrecomputeForLevel(numSlots, current_level, levelBudget, bsgsDim);
+    cc->EvalLinearTransformPrecomputeForLevel(numSlots, current_level + 2, levelBudget, bsgsDim);
+    std::cout << "Linear Transform Precomputation is done." << std::endl;
+
     // // BTS
     // auto ciphertextAfter = cc->EvalBootstrap(ct);
     // std::cout << "Number of levels remaining after bootstrapping: " << depth - ciphertextAfter->GetLevel() << std::endl
@@ -112,13 +125,14 @@ void StC_CtS_example() {
     std::cout << "SlotToCoeff SUCESS!" << std::endl;
 
     // CtS
-    auto ctAfterCtS = cc->EvalCtS(ctAfterStC);
-    std::cout << "CoeffToSlot SUCESS!" << std::endl;
+    // auto ctAfterCtS = cc->EvalCtS(ctAfterStC);
+    // auto ctAfterCtS = cc->EvalCtS(ct);
+    // std::cout << "CoeffToSlot SUCESS!" << std::endl;
 
     Plaintext result;
-    cc->Decrypt(keypair.secretKey, ctAfterCtS, &result);
+    cc->Decrypt(keypair.secretKey, ctAfterStC, &result);
     result->SetLength(numSlots);
-    std::cout << "Output after StC -> CtS \n\t" << result << std::endl;
+    std::cout << "Output after StC \n\t" << result << std::endl;
 
 
 

@@ -3411,10 +3411,23 @@ public:
     // StC和CtS的直接调用
     //------------------------------------------------------------------------------
     /**
+   * StC/CtS的预计算实现
+   *
+   * @param ciphertext the input ciphertext.
+   * @author SeehowLi lsh0126@nudt.edu.cn
+   */
+    void EvalLinearTransformPrecomputeForLevel(uint32_t slots, uint32_t targetLevel,
+                                               std::vector<uint32_t> levelBudget={5, 4},
+                                               std::vector<uint32_t> dim1={0, 0}) {
+        GetScheme()->EvalLinearTransformPrecomputeForLevel(*this, slots, targetLevel, levelBudget, dim1);
+    }
+
+    /**
    * StC的实现
    *
    * @param ciphertext the input ciphertext.
    * @return the ciphertext in coeff-encoded.
+   * @author SeehowLi lsh0126@nudt.edu.cn
    */
     Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
         return GetScheme()->EvalStC(ciphertext);
@@ -3425,6 +3438,7 @@ public:
    *
    * @param ciphertext the input ciphertext.
    * @return the ciphertext in slot-encoded.
+   * @author SeehowLi lsh0126@nudt.edu.cn
    */
     Ciphertext<Element> EvalCtS(ConstCiphertext<Element> ciphertext) const {
         return GetScheme()->EvalCtS(ciphertext);

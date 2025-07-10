@@ -1424,6 +1424,15 @@ public:
         return m_FHE->EvalBootstrap(ciphertext, numIterations, precision);
     }
 
+    void EvalLinearTransformPrecomputeForLevel(const CryptoContextImpl<Element>& cc,
+                                               uint32_t slots = 0, uint32_t targetLevel =  8,
+                                               const std::vector<uint32_t>& levelBudget = {5, 4},
+                                               const std::vector<uint32_t>& dim1 = {0, 0}) {
+    VerifyFHEEnabled(__func__);
+    m_FHE->EvalLinearTransformPrecomputeForLevel(cc, slots, targetLevel, levelBudget, dim1);
+    return;
+}
+
     Ciphertext<Element> EvalStC(ConstCiphertext<Element> ciphertext) const {
     VerifyFHEEnabled(__func__);
     return m_FHE->EvalStC(ciphertext);

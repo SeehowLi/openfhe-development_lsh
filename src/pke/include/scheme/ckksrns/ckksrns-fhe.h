@@ -333,13 +333,13 @@ public:
      * @param cc: 加密上下文
      * @param slots: 槽位数
      * @param targetLevel: 目标层级
-     * @author: Seehow Li
+     * @author Seehow Li
      */
     void EvalLinearTransformPrecomputeForLevel(const CryptoContextImpl<DCRTPoly>& cc,
                                                uint32_t slots,
                                                uint32_t targetLevel,
-                                               const std::vector<uint32_t>& levelBudget,
-                                               const std::vector<uint32_t>& dim1);
+                                               std::vector<uint32_t> levelBudget,
+                                               std::vector<uint32_t> dim1) override;
     //------------------------------------------------------------------------------
     // SERIALIZATION
     //------------------------------------------------------------------------------
