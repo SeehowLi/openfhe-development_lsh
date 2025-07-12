@@ -1,3 +1,13 @@
+/*
+ * @Author: SeehowLi lsh0126@nudt.edu.cn
+ * @Date: 2025-04-15 13:07:35
+ * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
+ * @LastEditTime: 2025-07-12 00:08:34
+ * @FilePath: \openfhe-development\src\pke\include\openfhe.h
+ * @Description: 
+ * 
+ * Copyright (c) 2025 by $SeehowLi lsh0126@nudt.edu.cn, All Rights Reserved. 
+ */
 //==================================================================================
 // BSD 2-Clause License
 //
@@ -73,5 +83,11 @@
 #include "scheme/ckksrns/gen-cryptocontext-ckksrns.h"
 #include "scheme/bfvrns/gen-cryptocontext-bfvrns.h"
 #include "scheme/bgvrns/gen-cryptocontext-bgvrns.h"
+
+/**
+ * @author Seehow Li
+ */
+// #include "homoencrypt-compute.h"
+// #include "nonlinearfunction/sorting-method.h"
 
 #endif /* SRC_LIB_OPENFHE_H_ */

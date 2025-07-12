@@ -2,7 +2,7 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-07-03 21:55:24
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-07-10 17:38:54
+ * @LastEditTime: 2025-07-10 20:06:50
  * @FilePath: \openfhe-development\src\pke\examples\discrete_ckks.cpp
  * @Description: 用于实现离散CKKS的示例代码
  * 
@@ -12,6 +12,7 @@
 #include "openfhe.h"
 #include "scheme/ckksrns/ckksrns-fhe.h"
 #include "scheme/ckksrns/ckksrns-scheme.h"
+#include "scheme/ckksrns/ckksrns-ser.h"
 using namespace lbcrypto;
 
 void StC_CtS_example();
