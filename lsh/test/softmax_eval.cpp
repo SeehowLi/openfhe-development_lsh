@@ -2,14 +2,14 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-06-02 23:27:17
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-06-03 10:23:21
+ * @LastEditTime: 2025-07-13 16:27:49
  * @FilePath: \openfhe-development\lsh\test\softmax_eval.cpp
  * @Description: approximate softmax function
  * 
  * Copyright (c) 2025 by $SeehowLi lsh0126@nudt.edu.cn, All Rights Reserved. 
  */
 
-#include "../../src/pke/include/openfhe.h"
+#include "openfhe.h"
 
 using namespace lbcrypto;
 
