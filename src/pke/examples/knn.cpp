@@ -536,7 +536,7 @@ void sphere_packing_grouping(const std::vector<std::vector<double>>& training_da
 
 // ========================================================================================== //
 
-// 将data拓展成16维度的向量
+// 将data拓展成32维度的向量
 void expand_groups_dimension_inplace() {
     Timer timer("Expanding groups dimension");
     
@@ -546,7 +546,7 @@ void expand_groups_dimension_inplace() {
         {
             // 扩展group1_data
             for (auto& vec : group1_data) {
-                vec.resize(16, 0.0);  // resize会在后面补0
+                vec.resize(32, 0.0);  // resize会在后面补0
             }
         }
         
@@ -554,7 +554,7 @@ void expand_groups_dimension_inplace() {
         {
             // 扩展group2_data
             for (auto& vec : group2_data) {
-                vec.resize(16, 0.0);
+                vec.resize(32, 0.0);
             }
         }
         
@@ -562,7 +562,7 @@ void expand_groups_dimension_inplace() {
         {
             // 扩展group3_data
             for (auto& vec : group3_data) {
-                vec.resize(16, 0.0);
+                vec.resize(32, 0.0);
             }
         }
         
@@ -570,7 +570,7 @@ void expand_groups_dimension_inplace() {
         {
             // 扩展group4_data
             for (auto& vec : group4_data) {
-                vec.resize(16, 0.0);
+                vec.resize(32, 0.0);
             }
         }
     }
@@ -579,11 +579,11 @@ void expand_groups_dimension_inplace() {
 // 拓展query成16维度的向量
 void expand_query_dimension_inplace() {
     Timer timer("Expanding query dimension");
-    query_data.resize(16, 0.0);  // resize会在后面补0
+    query_data.resize(32, 0.0);  // resize会在后面补0
 }
 
 // 将group数据转换为一维向量的函数
-vector<double> convert_group_to_1d(const vector<vector<double>>& group_data, int elements_per_row = 16) {
+vector<double> convert_group_to_1d(const vector<vector<double>>& group_data, int elements_per_row = 32) {
     vector<double> result;
     result.reserve(group_data.size() * elements_per_row);
     
@@ -612,22 +612,22 @@ void process_groups_to_1d() {
     {
         #pragma omp section
         {
-            group1_1d = convert_group_to_1d(group1_data);
+            group1_1d = convert_group_to_1d(group1_data, 32);
         }
         
         #pragma omp section
         {
-            group2_1d = convert_group_to_1d(group2_data);
+            group2_1d = convert_group_to_1d(group2_data, 32);
         }
         
         #pragma omp section
         {
-            group3_1d = convert_group_to_1d(group3_data);
+            group3_1d = convert_group_to_1d(group3_data, 32);
         }
         
         #pragma omp section
         {
-            group4_1d = convert_group_to_1d(group4_data);
+            group4_1d = convert_group_to_1d(group4_data, 32);
         }
     }
 
@@ -661,14 +661,14 @@ vector<double> expand_query_data(int repeat_times = 32) {
 }
 
 // 创建距离掩码函数
-void create_distance_mask(vector<double>& distance_mask, int num_groups = 32, int elements_per_group = 16) {
+void create_distance_mask(vector<double>& distance_mask, int num_groups = 32, int elements_per_group = 32) {
     Timer timer("Creating distance mask");
     
     int total_length = num_groups * elements_per_group;
     distance_mask.clear();
     distance_mask.resize(total_length, 0.0);
     
-    // 每16个数字的第一个设置为1
+    // 每32个数字的第一个设置为1
     for (int i = 0; i < num_groups; i++) {
         distance_mask[i * elements_per_group] = 1.0;
     }
@@ -738,21 +738,12 @@ int main() {
         normalize_query_and_training();
         // 处理输入向量成一维->group1_1d, group2_1d, group3_1d->32*16/group4_1d->4*16
         process_groups_to_1d();
+        group4_1d.resize(32 * 32, 0.0); // 最后4个group扩展成1024维度
         
         // 并行重复拓展query_data
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                query_data_exp32 = expand_query_data(32);
-            }
-            
-            #pragma omp section
-            {
-                query_data_exp4 = expand_query_data(4);
-            }
-        }
+        query_data_exp32 = expand_query_data(32);
     }
+        
 
     // 加密参数设置
     int num_slot_dis1 = 32;// 前三组group中有效距离的个数
@@ -760,11 +751,10 @@ int main() {
     int num_dim = 16; // 每个group的维度
     int num_slot = num_slot_dis1 * num_slot_dis1; // 最终的槽数1024
     int num_slots1 = num_slot_dis1 * num_dim;
-    int num_slots2 = num_slot_dis2 * num_dim;
+    // int num_slots2 = num_slot_dis2 * num_dim;
+    // =============== 重要参数 =============== //
     int levels_required = 45;
     uint32_t ring_dim = 1 << 15; // 32768
-    int gap1 = static_cast<int>(ring_dim)/ ( 2 * num_slots1); // 32
-    int gap2 = static_cast<int>(ring_dim)/ ( 2 * num_slots2); // 256
     double lowbound_dis = 0.0;
     double upbound_dis = 0.9;
     uint32_t sqrt_cheb_degree = 31; // 五层
@@ -773,9 +763,10 @@ int main() {
     vector<double> distance_mask1;
     vector<double> distance_mask2;
 
-    // 创建距离掩码
-    create_distance_mask(distance_mask1, num_slot_dis1, num_dim);
-    create_distance_mask(distance_mask2, num_slot_dis2, num_dim);
+    // 创建距离掩码--每32个数字的第一个为1
+    create_distance_mask(distance_mask1, num_slot_dis1, num_slot_dis1);
+    create_distance_mask(distance_mask2, num_slot_dis2, num_slot_dis1);
+    distance_mask2.resize(num_slot, 0.0);
 
     // ============================ 针对32槽的加密上下文 ============================ //
     CCParams<CryptoContextCKKSRNS> parameters;
@@ -802,10 +793,8 @@ int main() {
     }
 
     cout << "N: " << parameters.GetRingDim() << endl;
-    cout << "Gap1: " << gap1 << endl;
-    cout << "Gap2: " << gap2 << endl;
 
-    parameters.SetBatchSize(num_slots1);
+    parameters.SetBatchSize(num_slot);
 
     ScalingTechnique rescaleTech = FLEXIBLEAUTO;
 
@@ -833,6 +822,7 @@ int main() {
         context->EvalMultKeyGen(key_pair.secretKey);
 
         // 生成旋转密钥--for permutation,计算欧氏距离,获得紧凑距离
+        // TODO:后面需要调整
         {
             Timer timer("Generating rotation keys");
             #pragma omp parallel sections
@@ -840,8 +830,8 @@ int main() {
                 #pragma omp section
                 {
                     vector<int> rotations;
-                    for (int i = 0; i < log2(num_slot_dis1); i++) {
-                        rotations.push_back(pow(2, i) * num_slot_dis1);
+                    for (int i = 0; i < log2(num_slot); i++) {
+                        rotations.push_back(pow(2, i) * num_slot);
                     }
                     context->EvalRotateKeyGen(key_pair.secretKey, rotations);
                 }
@@ -849,21 +839,25 @@ int main() {
                 #pragma omp section
                 {
                     vector<int> rotations2;
-                    for (int i = 0; i < log2(num_slot_dis1); i++) {
+                    for (int i = 0; i < log2(num_slot); i++) {
                         rotations2.push_back(pow(2, i));
                     }
                     context->EvalRotateKeyGen(key_pair.secretKey, rotations2);
                 }
-                #pragma omp section
+                #pragma omp section // 好像不需要了
                 {
                     vector<int> rotations3;
-                    for (int i = 0; i < log2(num_slot_dis1) + 1; i++) {
+                    for (int i = 0; i < log2(num_slot) + 1; i++) {
                         rotations3.push_back(pow(2, i) * (num_dim - 1));
                         if(i == log2(num_slot_dis1)){
                             rotations3.push_back((num_dim - 1) * (num_dim - 1));
                         }
                     }
                     context->EvalRotateKeyGen(key_pair.secretKey, rotations3);
+                }
+                #pragma omp section
+                {
+                    context->EvalRotateKeyGen(key_pair.secretKey, {-32, 32});
                 }
             }
         }
@@ -880,53 +874,47 @@ int main() {
             {
                 #pragma omp section
                 {
-                    ptxt1 = context->MakeCKKSPackedPlaintext(group1_1d, 1, 1, nullptr, static_cast<size_t>(num_slots1));
-                    ptxt1->SetLength(num_slots1);
+                    ptxt1 = context->MakeCKKSPackedPlaintext(group1_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt1->SetLength(num_slot);
                     #pragma omp critical
                     cout << "Group1 encode success!" << endl;
                 }
                 
                 #pragma omp section
                 {
-                    ptxt2 = context->MakeCKKSPackedPlaintext(group2_1d, 1, 1, nullptr, static_cast<size_t>(num_slots1));
-                    ptxt2->SetLength(num_slots1);
+                    ptxt2 = context->MakeCKKSPackedPlaintext(group2_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt2->SetLength(num_slot);
                     #pragma omp critical
                     cout << "Group2 encode success!" << endl;
                 }
                 
                 #pragma omp section
                 {
-                    ptxt3 = context->MakeCKKSPackedPlaintext(group3_1d, 1, 1, nullptr, static_cast<size_t>(num_slots1));
-                    ptxt3->SetLength(num_slots1);
+                    ptxt3 = context->MakeCKKSPackedPlaintext(group3_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt3->SetLength(num_slot);
                     #pragma omp critical
                     cout << "Group3 encode success!" << endl;
                 }
                 
                 #pragma omp section
                 {
-                    ptxt4 = context->MakeCKKSPackedPlaintext(group4_1d, 1, 1, nullptr, static_cast<size_t>(num_slots2));
-                    ptxt4->SetLength(num_slots2);
+                    ptxt4 = context->MakeCKKSPackedPlaintext(group4_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt4->SetLength(num_slot);
                     #pragma omp critical
                     cout << "Group4 encode success!" << endl;
                 }
                 
                 #pragma omp section
                 {
-                    ptxt_query32 = context->MakeCKKSPackedPlaintext(query_data_exp32, 1, 1, nullptr, static_cast<size_t>(num_slots1));
-                    ptxt_query32->SetLength(num_slots1);
+                    ptxt_query32 = context->MakeCKKSPackedPlaintext(query_data_exp32, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt_query32->SetLength(num_slot);
                     #pragma omp critical
                     cout << "Query32 encode success!" << endl;
                 }
-                
-                #pragma omp section
-                {
-                    ptxt_query4 = context->MakeCKKSPackedPlaintext(query_data_exp4, 1, 1, nullptr, static_cast<size_t>(num_slots2));
-                    ptxt_query4->SetLength(num_slots2);
-                    #pragma omp critical
-                    cout << "Query4 encode success!" << endl;
-                }
             }
         }
+        // cout << "ptxt1:" << ptxt1 << endl;
+        // cout << "ptxt_query32:" << ptxt_query32 << endl;
 
         /**
         *@brief 初始数据加密
@@ -972,13 +960,6 @@ int main() {
                     #pragma omp critical
                     cout << "Query32 encrypt success!" << endl;
                 }
-                
-                #pragma omp section
-                {
-                    ctqry4 = context->Encrypt(key_pair.publicKey, ptxt_query4);
-                    #pragma omp critical
-                    cout << "Query4 encrypt success!" << endl;
-                }
             }
         }
 
@@ -1005,7 +986,7 @@ int main() {
                 ctminus3 = context->EvalSub(ctgr3, ctqry32);
                 
                 #pragma omp section
-                ctminus4 = context->EvalSub(ctgr4, ctqry4);
+                ctminus4 = context->EvalSub(ctgr4, ctqry32);
             }
             cout << "Subtraction done!" << endl;
         }
@@ -1034,158 +1015,127 @@ int main() {
         }
         cout << "Current depth is: " << levels_required - ctminus1_square->GetLevel() << endl;
         
-        auto ctdistance1_square = ctminus1_square->Clone();
-        auto ctdistance2_square = ctminus2_square->Clone();
-        auto ctdistance3_square = ctminus3_square->Clone();
-        auto ctdistance4_square = ctminus4_square->Clone();
-        
-        // 旋转相加--计算欧式距离
-        {
-            Timer timer("Rotation and addition for Euclidean distance");
-
-            for (int i = 0; i < log2(num_dim); i++) {
-                #pragma omp parallel sections
-                {
-                    #pragma omp section
-                    ctdistance1_square = context->EvalAdd(ctdistance1_square, context->EvalRotate(ctdistance1_square, pow(2, i)));
-                    
-                    #pragma omp section
-                    ctdistance2_square = context->EvalAdd(ctdistance2_square, context->EvalRotate(ctdistance2_square, pow(2, i)));
-                    
-                    #pragma omp section
-                    ctdistance3_square = context->EvalAdd(ctdistance3_square, context->EvalRotate(ctdistance3_square, pow(2, i)));
-                    
-                    #pragma omp section
-                    ctdistance4_square = context->EvalAdd(ctdistance4_square, context->EvalRotate(ctdistance4_square, pow(2, i)));
-                }
-            }
+        // 旋转预处理--折半处理
+        // TODO:需要新的旋转密钥--放到前面的并行处理
+        vector<double> bemask(1024),afmask(1024);
+        for (int i = 0; i < 1024; i++) {
+            bemask[i] = ((i / 32) % 2 == 0) ? 1.0 : 0.0;  // 先32个1，再32个0
+            afmask[i] = ((i / 32) % 2 == 1) ? 1.0 : 0.0;  // 先32个0，再32个1
         }
-        cout << "Current depth is: " << levels_required - ctdistance1_square->GetLevel() << endl;
+        auto pt_bemask = context->MakeCKKSPackedPlaintext(bemask, 1, ctminus1_square->GetLevel(), nullptr, num_slot);
+        auto pt_afmask = context->MakeCKKSPackedPlaintext(afmask, 1, ctminus1_square->GetLevel(), nullptr, num_slot);
+
+        
+        auto ct_bemask1 = context->EvalMult(ctminus1_square, pt_bemask);
+        auto ct_afmask1 = context->EvalMult(ctminus1_square, pt_afmask);
+        // #1先填满
+        context->EvalAddInPlace(ct_bemask1, context->EvalRotate(ct_bemask1, -32));
+        context->EvalAddInPlace(ct_afmask1, context->EvalRotate(ct_afmask1,  32));
+        // #2旋转求和
+        for (int i = 0; i < log2(num_slot_dis1); i++) {
+            context->EvalAddInPlace(ct_bemask1, context->EvalRotate(ct_bemask1, pow(2, i)));
+            context->EvalAddInPlace(ct_afmask1, context->EvalRotate(ct_afmask1, pow(2, i)));
+        }
+        ct_bemask1 = context->EvalMult(ct_bemask1, pt_bemask);
+        ct_afmask1 = context->EvalMult(ct_afmask1, pt_bemask);
+        ct_afmask1 = context->EvalRotate(ct_afmask1, -32);
+        auto ctdistance1_rep_square = context->EvalAdd(ct_bemask1, ct_afmask1);
+
+        auto ctdistance1_rep = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+                                            ctdistance1_rep_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
+
+        // auto ctdistance1_square = ctminus1_square->Clone();
+        // auto ctdistance2_square = ctminus2_square->Clone();
+        // auto ctdistance3_square = ctminus3_square->Clone();
+        // auto ctdistance4_square = ctminus4_square->Clone();
+        // // 旋转相加--计算欧式距离
+        // {
+        //     Timer timer("Rotation and addition for Euclidean distance");
+        //     for (int i = 0; i < log2(num_slot_dis1); i++) {
+        //         #pragma omp parallel sections
+        //         {
+        //             #pragma omp section
+        //             context->EvalAddInPlace(ctdistance1_square, context->EvalRotate(ctdistance1_square, pow(2, i)));
+                    
+        //             #pragma omp section
+        //             context->EvalAddInPlace(ctdistance2_square, context->EvalRotate(ctdistance2_square, pow(2, i)));
+
+        //             #pragma omp section
+        //             context->EvalAddInPlace(ctdistance3_square, context->EvalRotate(ctdistance3_square, pow(2, i)));
+
+        //             #pragma omp section
+        //             context->EvalAddInPlace(ctdistance4_square, context->EvalRotate(ctdistance4_square, pow(2, i)));
+        //         }
+        //     }
+        // }
+        // cout << "Current depth is: " << levels_required - ctdistance1_square->GetLevel() << endl;
 
 
         // 开根--Chebyshev近似，来增加距离的大小与区分度
-        Cipher ctdistance1, ctdistance2, ctdistance3, ctdistance4;
+        // Cipher ctdistance1, ctdistance2, ctdistance3, ctdistance4;
         
-        {
-            Timer timer("Chebyshev approximation for square root");
+        // {
+        //     Timer timer("Chebyshev approximation for square root");
             
-            #pragma omp parallel sections
-            {
-                #pragma omp section
-                ctdistance1 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
-                                            ctdistance1_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
+        //     #pragma omp parallel sections
+        //     {
+        //         #pragma omp section
+        //         ctdistance1 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+        //                                     ctdistance1_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
                 
-                #pragma omp section
-                ctdistance2 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
-                                            ctdistance2_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
+        //         #pragma omp section
+        //         ctdistance2 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+        //                                     ctdistance2_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
                 
-                #pragma omp section
-                ctdistance3 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
-                                            ctdistance3_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
+        //         #pragma omp section
+        //         ctdistance3 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+        //                                     ctdistance3_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
                 
-                #pragma omp section
-                ctdistance4 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
-                                            ctdistance4_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
-            }
-        }
-        cout << "Current depth is: " << levels_required - ctdistance1->GetLevel() << endl;
+        //         #pragma omp section
+        //         ctdistance4 = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+        //                                     ctdistance4_square, lowbound_dis, upbound_dis, sqrt_cheb_degree);
+        //     }
+        // }
+        // cout << "Current depth is: " << levels_required - ctdistance1->GetLevel() << endl;
 
         /**
          * @brief sorting计算的数据预处理
          */
-        auto distance_mask1_encode = context->MakeCKKSPackedPlaintext(distance_mask1,1, ctdistance1->GetLevel(), nullptr, num_slots1);
-        auto distance_mask2_encode = context->MakeCKKSPackedPlaintext(distance_mask2,1, ctdistance2->GetLevel(), nullptr, num_slots2);
-        auto ctdistance1_pure = context->EvalMult(ctdistance1, distance_mask1_encode);
-        auto ctdistance2_pure = context->EvalMult(ctdistance2, distance_mask1_encode);
-        auto ctdistance3_pure = context->EvalMult(ctdistance3, distance_mask1_encode);
-        auto ctdistance4_pure = context->EvalMult(ctdistance4, distance_mask2_encode);
-        cout << "Current depth is: " << levels_required - ctdistance1_pure->GetLevel() << endl;
+        // auto distance_mask1_encode = context->MakeCKKSPackedPlaintext(distance_mask1,1, ctdistance1->GetLevel(), nullptr, num_slot);
+        // auto distance_mask2_encode = context->MakeCKKSPackedPlaintext(distance_mask2,1, ctdistance2->GetLevel(), nullptr, num_slot);
+        // auto ctdistance1_pure = context->EvalMult(ctdistance1, distance_mask1_encode);
+        // auto ctdistance2_pure = context->EvalMult(ctdistance2, distance_mask1_encode);
+        // auto ctdistance3_pure = context->EvalMult(ctdistance3, distance_mask1_encode);
+        // auto ctdistance4_pure = context->EvalMult(ctdistance4, distance_mask2_encode);
+        // cout << "Current depth is: " << levels_required - ctdistance1_pure->GetLevel() << endl;
         
-        // 难道需要一个新的密文？我觉得可以分开处理--不行，不解密不同的密文无法相互传递信息
-        vector<double> distance_mask11, distance_mask12;
-        distance_mask11.resize(num_slots1, 0.0);
-        distance_mask12.resize(num_slots1, 0.0);
-        // 前32个数据设置为1
-        for(int i=0;i<num_slot_dis1;i++){
-            distance_mask11[i] = 1.0;
-            distance_mask12[i] = 1.0;
-            distance_mask12[i + num_slot_dis1] = 1.0;
-        }
+        // 计算expand和repeat
         
-        auto pt_bridge1 = context->MakeCKKSPackedPlaintext(distance_mask11, 1, ctdistance1_pure->GetLevel(), 
-                                                           nullptr, num_slots1);
-        pt_bridge1->SetLength(static_cast<size_t>(num_slots1));
-
-        auto pt_bridge2 = context->MakeCKKSPackedPlaintext(distance_mask12, 1, ctdistance2_pure->GetLevel(), 
-                                                           nullptr, num_slots1);
-        pt_bridge2->SetLength(static_cast<size_t>(num_slots1));
-
-        // 处理距离都往前移动，变成紧凑密文
-        // TODO:可能需要补充旋转密钥--√
-        auto ctdistance1_tight = ctdistance1_pure->Clone();
-
-        for(int i = 0;i < log2(num_dim); i++){
-            context->EvalAddInPlace(ctdistance1_tight,
-                                    context->EvalRotate(ctdistance1_tight, (num_dim-1)* pow(2,i))); 
-        }
-        ctdistance1_tight = context->EvalMult(ctdistance1_tight, pt_bridge1);
-        context->EvalAddInPlace(ctdistance1_tight,
-                                    context->EvalRotate(ctdistance1_tight, (num_dim-1)* (num_dim-1)));
-        ctdistance1_tight = context->EvalMult(ctdistance1_tight, pt_bridge2);
-
-
-        // ctdistance1_tight->SetSlots(static_cast<usint>(num_slot_dis1));
-
-        // context->EvalBootstrapSetup({2,2}, {0,0}, num_slots1);
-        // context->EvalBootstrapSetup({2,2}, {0,0}, num_slot_dis1);
-        // context->EvalBootstrapKeyGen(key_pair.secretKey, num_slots1);
-        // context->EvalBootstrapKeyGen(key_pair.secretKey, num_slot_dis1);
-        
-        // context->EvalLinearTransformPrecomputeForLevel(num_slots1, levels_required-ctdistance1_tight->GetLevel(), 
-        //                                             {2,2}, {0, 0});
-        // context->EvalLinearTransformPrecomputeForLevel(num_slot_dis1, levels_required-ctdistance1_tight->GetLevel() - 2, 
-        //                                             {2,2}, {0, 0}); 
-        // auto ctdistance1_tight_afterstc =  context->EvalStC(ctdistance1_tight);
-        // auto ctdistance1_tight_aftercts =  context->EvalCtS(ctdistance1_tight_afterstc);
-
-
-
-        // 需要旋转密文把有效数据都放到前面来，setslots好像只会从前到后保持
-        // ctdistance1_pure->SetSlots(static_cast<usint>(num_slot_dis1));
-        // cout << "Slots used: " << ctdistance1_pure->GetSlots() << endl;
-        // cout << "Slots used: " << ctdistance2_pure->GetSlots() << endl;
-
-        // 计算转换有效槽位的密文
-        // auto ctdistance1_pure_bridge = context->EvalAdd(ctdistance1_pure, ct_bridge1);
+        auto ct_rot1 = context->EvalRotate(ctminus1_square, pow(2,0));
 
         // 解密结果
-        Plain result1, result2, result4;
+        Plain result1, result2, result3, result4;
         
         {
             Timer timer("Decryption");
             
-            context->Decrypt(key_pair.secretKey, ctdistance1_tight, &result1);
-            context->Decrypt(key_pair.secretKey, ctdistance1_pure, &result2);
-            context->Decrypt(key_pair.secretKey, ctdistance4, &result4);
+            context->Decrypt(key_pair.secretKey, ctdistance1_rep, &result1);
+            context->Decrypt(key_pair.secretKey, ct_bemask1, &result2);
+            // context->Decrypt(key_pair.secretKey, ct_rot2, &result3);
+            // context->Decrypt(key_pair.secretKey, ct_rot3, &result4);
         }
 
         // result1->SetLength(static_cast<size_t>(num_slot_dis1));
-        result2->SetLength(static_cast<size_t>(num_slots1));
-        result4->SetLength(static_cast<size_t>(num_slots2));
+        // result2->SetLength(static_cast<size_t>(num_slots1));
+        // result4->SetLength(static_cast<size_t>(num_slots2));
 
 
         cout << "result1:" << result1 << endl;
-        for(size_t i=0; i < result2->GetLength(); i+= num_dim) {
-            cout << "result2[" << i << "]: " << result2->GetCKKSPackedValue()[i] << " ";
-        }
-        cout << endl;
-
-        for(size_t i=0; i < result4->GetLength(); i+= num_dim) {
-            cout << "result4[" << i << "]: " << result4->GetCKKSPackedValue()[i] << " ";
-        }
-        cout << endl;
-        cout << "result length: " << result2->GetLength() << endl;
+        cout << "result2:" << result2 << endl;
+        // cout << "result3:" << result3 << endl;
+        // cout << "result4:" << result4 << endl;
     }
+
     
     auto total_end = chrono::high_resolution_clock::now();
     auto total_duration = chrono::duration_cast<chrono::milliseconds>(total_end - total_start);
