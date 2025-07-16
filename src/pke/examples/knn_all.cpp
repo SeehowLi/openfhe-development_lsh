@@ -30,7 +30,7 @@ vector<vector<double>> group3_data;  // 后36个
 vector<vector<double>> group4_data;  // 最后4个
 
 vector<double> query_data_exp32;  //拓展的query_data
-vector<double> query_data_exp4;  //拓展的query_data
+vector<double> training_data_1d;  // 前32个
 vector<double> group1_1d;  // 前32个
 vector<double> group2_1d;  // 中间32个
 vector<double> group3_1d;  // 后32个
@@ -541,54 +541,23 @@ void sphere_packing_grouping(const std::vector<std::vector<double>>& training_da
 
 // ========================================================================================== //
 
-// 将data拓展成32维度的向量
+// 将data拓展成128维度的向量
 void expand_groups_dimension_inplace() {
     Timer timer("Expanding groups dimension");
     
-    #pragma omp parallel sections
-    {
-        #pragma omp section
-        {
-            // 扩展group1_data
-            for (auto& vec : group1_data) {
-                vec.resize(32, 0.0);  // resize会在后面补0
-            }
-        }
-        
-        #pragma omp section
-        {
-            // 扩展group2_data
-            for (auto& vec : group2_data) {
-                vec.resize(32, 0.0);
-            }
-        }
-        
-        #pragma omp section
-        {
-            // 扩展group3_data
-            for (auto& vec : group3_data) {
-                vec.resize(32, 0.0);
-            }
-        }
-        
-        #pragma omp section
-        {
-            // 扩展group4_data
-            for (auto& vec : group4_data) {
-                vec.resize(32, 0.0);
-            }
-        }
+    for (auto& vec : training_data) {
+        vec.resize(128, 0.0);
     }
 }
 
-// 拓展query成16维度的向量
+// 拓展query成128维度的向量
 void expand_query_dimension_inplace() {
     Timer timer("Expanding query dimension");
-    query_data.resize(32, 0.0);  // resize会在后面补0
+    query_data.resize(128, 0.0);  // resize会在后面补0
 }
 
 // 将group数据转换为一维向量的函数
-vector<double> convert_group_to_1d(const vector<vector<double>>& group_data, int elements_per_row = 32) {
+vector<double> convert_group_to_1d(const vector<vector<double>>& group_data, int elements_per_row = 128) {
     vector<double> result;
     result.reserve(group_data.size() * elements_per_row);
     
@@ -611,48 +580,23 @@ vector<double> convert_group_to_1d(const vector<vector<double>>& group_data, int
 // 处理所有group数据的函数
 void process_groups_to_1d() {
     Timer timer("Processing groups to 1D");
-    
-    // 并行转换各组数据为一维向量
-    #pragma omp parallel sections
-    {
-        #pragma omp section
-        {
-            group1_1d = convert_group_to_1d(group1_data, 32);
-        }
-        
-        #pragma omp section
-        {
-            group2_1d = convert_group_to_1d(group2_data, 32);
-        }
-        
-        #pragma omp section
-        {
-            group3_1d = convert_group_to_1d(group3_data, 32);
-        }
-        
-        #pragma omp section
-        {
-            group4_1d = convert_group_to_1d(group4_data, 32);
-        }
-    }
+
+    training_data_1d = convert_group_to_1d(training_data, 128);
 
     // 打印转换结果的统计信息
     cout << "\n=== 1D Conversion Results ===" << endl;
-    cout << "Group 1: " << group1_data.size() << " rows -> " << group1_1d.size() << " elements" << endl;
-    cout << "Group 2: " << group2_data.size() << " rows -> " << group2_1d.size() << " elements" << endl;
-    cout << "Group 3: " << group3_data.size() << " rows -> " << group3_1d.size() << " elements" << endl;
-    cout << "Group 4: " << group4_data.size() << " rows -> " << group4_1d.size() << " elements" << endl;
+    cout << "Training Data: " << training_data.size() << " rows -> " << training_data_1d.size() << " elements" << endl;
 
     // 验证前几个元素
-    cout << "\nGroup 1 (first 20 elements): ";
-    for (int i = 0; i < min(32, (int)group1_1d.size()); i++) {
-        cout << fixed << setprecision(3) << group1_1d[i] << " ";
+    cout << "\nTraining Data (first 20 elements): ";
+    for (int i = 0; i < min(128, (int)training_data_1d.size()); i++) {
+        cout << fixed << setprecision(3) << training_data_1d[i] << " ";
     }
     cout << endl;
 }
 
-// 将query_data扩展重复32次的函数
-vector<double> expand_query_data(int repeat_times = 32) {
+// 将query_data扩展重复128次的函数
+vector<double> expand_query_data(int repeat_times = 128) {
     vector<double> expanded_query;
     expanded_query.reserve(query_data.size() * repeat_times);
     
@@ -666,7 +610,7 @@ vector<double> expand_query_data(int repeat_times = 32) {
 }
 
 // 创建距离掩码函数
-void create_distance_mask(vector<double>& distance_mask, int num_groups = 32, int elements_per_group = 32) {
+void create_distance_mask(vector<double>& distance_mask, int num_groups = 128, int elements_per_group = 128) {
     Timer timer("Creating distance mask");
     
     int total_length = num_groups * elements_per_group;
@@ -734,33 +678,26 @@ int main() {
     {
         Timer timer("Total data preprocessing");
         
-        // 分组
-        sphere_packing_grouping(training_data);
         // 扩展数据维度
         expand_groups_dimension_inplace();
         // 扩展query维度
         expand_query_dimension_inplace();
         // 归一化查询和训练数据
         normalize_query_and_training();
-        // 处理输入向量成一维->group1_1d, group2_1d, group3_1d->32*16/group4_1d->4*16
+        // 处理输入向量成一维->128*128
         process_groups_to_1d();
-        group4_1d.resize(32 * 32, 0.0); // 最后4个group扩展成1024维度
         
         // 并行重复拓展query_data
-        query_data_exp32 = expand_query_data(32);
+        query_data_exp32 = expand_query_data(128);
     }
         
 
     // 加密参数设置
-    int num_slot_dis1 = 32;// 前三组group中有效距离的个数
-    int num_slot_dis2 = 4; // 最后一组group中有效距离的个数
-    // int num_dim = 16; // 每个group的维度
-    int num_slot = num_slot_dis1 * num_slot_dis1; // 最终的槽数1024
-    // int num_slots1 = num_slot_dis1 * num_dim;
-    // int num_slots2 = num_slot_dis2 * num_dim;
+    int num_slot_dis1 = 128;// 前三组group中有效距离的个数
+    int num_slot = num_slot_dis1 * num_slot_dis1; // 最终的槽数16384
     // =============== 重要参数 =============== //
-    int levels_required = 45;
-    uint32_t ring_dim = 1 << 15; // 32768
+    int levels_required = 50;
+    uint32_t ring_dim = 1 << 16; // 65536
     double lowbound_dis = 0.0;
     double upbound_dis = 0.9;
     uint32_t sqrt_cheb_degree = 31; // 五层
@@ -769,12 +706,10 @@ int main() {
     vector<double> distance_mask1;
     vector<double> distance_mask2;
 
-    // 创建距离掩码--每32个数字的第一个为1
+    // 创建距离掩码--每128个数字的第一个为1
     create_distance_mask(distance_mask1, num_slot_dis1, num_slot_dis1);
-    create_distance_mask(distance_mask2, num_slot_dis2, num_slot_dis1);
-    distance_mask2.resize(num_slot, 0.0);
 
-    // ============================ 针对32槽的加密上下文 ============================ //
+    // ============================ 针对128槽的加密上下文 ============================ //
     {
         Timer timer("Generating crypto context and rotation keys");
         hec.generate_context_knn(num_slot, levels_required, ring_dim, toy);
@@ -783,7 +718,7 @@ int main() {
     /**
     *@brief 初始数据编码成明文向量
     */
-    Plain ptxt1, ptxt2, ptxt3, ptxt4, ptxt_query32, ptxt_query4;
+    Plain pt_data ,ptxt_query32;
     {
         Timer timer("Encoding plaintexts");
         
@@ -791,30 +726,9 @@ int main() {
         {
             #pragma omp section
             {
-                ptxt1 = hec.encode(group1_1d, 1, 1, num_slot);
+                pt_data = hec.encode(training_data_1d, 1, 1, num_slot);
                 #pragma omp critical
-                cout << "Group1 encode success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ptxt2 =  hec.encode(group2_1d, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Group2 encode success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ptxt3 =  hec.encode(group3_1d, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Group3 encode success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ptxt4 =  hec.encode(group4_1d, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Group4 encode success!" << endl;
+                cout << "Training Data encode success!" << endl;
             }
             
             #pragma omp section
@@ -829,7 +743,7 @@ int main() {
     /**
     *@brief 初始数据加密
     */
-    Cipher ctgr1, ctgr2, ctgr3, ctgr4, ctqry32, ctqry4;
+    Cipher ctdata, ctqry32;
     
     {
         Timer timer("Encrypting data");
@@ -838,30 +752,9 @@ int main() {
         {
             #pragma omp section
             {
-                ctgr1 = hec.encrypt(ptxt1);
+                ctdata = hec.encrypt(pt_data);
                 #pragma omp critical
-                cout << "Group1 encrypt success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ctgr2 = hec.encrypt(ptxt2);
-                #pragma omp critical
-                cout << "Group2 encrypt success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ctgr3 = hec.encrypt(ptxt3);
-                #pragma omp critical
-                cout << "Group3 encrypt success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ctgr4 = hec.encrypt(ptxt4);
-                #pragma omp critical
-                cout << "Group4 encrypt success!" << endl;
+                cout << "Training Data encrypt success!" << endl;
             }
             
             #pragma omp section
@@ -872,227 +765,96 @@ int main() {
             }
         }
     }
-    cout << "Current depth is: " << levels_required - ctgr1->GetLevel() << endl;
+    cout << "Current depth is: " << levels_required - ctdata->GetLevel() << endl;
 
     /**
     *@brief 欧式距离计算
     */
     // 减法做差
-    Cipher ctminus1, ctminus2, ctminus3, ctminus4;
+    Cipher ctminus;
     
     {
         Timer timer("Subtraction");
-        
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            ctminus1 = hec.sub(ctgr1, ctqry32);
-            
-            #pragma omp section
-            ctminus2 = hec.sub(ctgr2, ctqry32);
 
-            #pragma omp section
-            ctminus3 = hec.sub(ctgr3, ctqry32);
-
-            #pragma omp section
-            ctminus4 = hec.sub(ctgr4, ctqry32);
-        }
+        ctminus = hec.sub(ctdata, ctqry32);
         cout << "Subtraction done!" << endl;
     }
 
     // 平方
-    Cipher ctminus1_square, ctminus2_square, ctminus3_square, ctminus4_square;
+    Cipher ctminus_square;
     
     {
         Timer timer("Squaring");
-        
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            ctminus1_square =  hec.square(ctminus1);
-            
-            #pragma omp section
-            ctminus2_square = hec.square(ctminus2);
-            
-            #pragma omp section
-            ctminus3_square = hec.square(ctminus3);
-            
-            #pragma omp section
-            ctminus4_square = hec.square(ctminus4);
-        }
+
+        ctminus_square = hec.square(ctminus);
         cout << "Square done!" << endl;
     }
-    cout << "Current depth is: " << levels_required - ctminus1_square->GetLevel() << endl;
+    cout << "Current depth is: " << levels_required - ctminus_square->GetLevel() << endl;
 
     // 旋转预处理--折半处理
     // TODO:需要新的旋转密钥--放到前面的并行处理
-    vector<double> bemask(1024),afmask(1024);
-    for (int i = 0; i < 1024; i++) {
-        bemask[i] = ((i / 32) % 2 == 0) ? 1.0 : 0.0;  // 先32个1，再32个0
-        afmask[i] = ((i / 32) % 2 == 1) ? 1.0 : 0.0;  // 先32个0，再32个1
+    vector<double> bemask(num_slot_dis1 * num_slot_dis1);
+    vector<double> afmask(num_slot_dis1 * num_slot_dis1);
+    for (int i = 0; i < num_slot_dis1 * num_slot_dis1; i++) {
+        bemask[i] = ((i / num_slot_dis1) % 2 == 0) ? 1.0 : 0.0;  // 先128个1，再128个0
+        afmask[i] = ((i / num_slot_dis1) % 2 == 1) ? 1.0 : 0.0;  // 先128个0，再128个1
     }
-    auto pt_bemask = hec.encode(bemask, 1, ctminus1_square->GetLevel(), num_slot);
-    auto pt_afmask = hec.encode(afmask, 1, ctminus1_square->GetLevel(), num_slot);
+    auto pt_bemask = hec.encode(bemask, 1, ctminus_square->GetLevel(), num_slot);
+    auto pt_afmask = hec.encode(afmask, 1, ctminus_square->GetLevel(), num_slot);
     
     vector<double> rep2exp_mask(num_slot, 0.0);
-    // 掩码的生成，每一组32个数，第x组的第x个数是1，其余是0
-    for (int i = 0; i < 32; i++) {
-        rep2exp_mask[i * 32 + i] = 1.0;
+    // 掩码的生成，每一组128个数，第x组的第x个数是1，其余是0
+    for (int i = 0; i < num_slot_dis1; i++) {
+        rep2exp_mask[i * num_slot_dis1 + i] = 1.0;
     }
 
     /**
      * @brief 计算repeat和expand
      */
-    Cipher ct_bemask1, ct_afmask1; Cipher ct_bemask2, ct_afmask2;
-    Cipher ct_bemask3, ct_afmask3; Cipher ct_bemask4, ct_afmask4;
-    Cipher ctdistance1_rep,ctdistance2_rep,ctdistance3_rep,ctdistance4_rep;
-    Cipher ctdistance1_exp,ctdistance2_exp,ctdistance3_exp,ctdistance4_exp;
+    Cipher ct_bemask, ct_afmask;
+    Cipher ctdistance_rep;
+    Cipher ctdistance_exp;
     {
         Timer timer("Expand Ciphertext");
         // #1先填满
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                ct_bemask1 = hec.mult(ctminus1_square, pt_bemask);
-                ct_afmask1 = hec.mult(ctminus1_square, pt_afmask);
-                
-                hec.add_inplace(ct_bemask1, hec.rot(ct_bemask1, -32));
-                hec.add_inplace(ct_afmask1, hec.rot(ct_afmask1,  32));
-            }
-            #pragma omp section
-            {
-                ct_bemask2 = hec.mult(ctminus2_square, pt_bemask);
-                ct_afmask2 = hec.mult(ctminus2_square, pt_afmask);
-                hec.add_inplace(ct_bemask2, hec.rot(ct_bemask2, -32));
-                hec.add_inplace(ct_afmask2, hec.rot(ct_afmask2,  32));
-            }
-            #pragma omp section
-            {
-                ct_bemask3 = hec.mult(ctminus3_square, pt_bemask);
-                ct_afmask3 = hec.mult(ctminus3_square, pt_afmask);
+        ct_bemask= hec.mult(ctminus_square, pt_bemask);
+        ct_afmask = hec.mult(ctminus_square, pt_afmask);
 
-                hec.add_inplace(ct_bemask3, hec.rot(ct_bemask3, -32));
-                hec.add_inplace(ct_afmask3, hec.rot(ct_afmask3,  32));
-            }
-            #pragma omp section
-            {
-                ct_bemask4 = hec.mult(ctminus4_square, pt_bemask);
-                ct_afmask4 = hec.mult(ctminus4_square, pt_afmask);
-
-                hec.add_inplace(ct_bemask4, hec.rot(ct_bemask4, -32));
-                hec.add_inplace(ct_afmask4, hec.rot(ct_afmask4,  32));
-            }
-        }
+        hec.add_inplace(ct_bemask, hec.rot(ct_bemask, -1 * num_slot_dis1));
+        hec.add_inplace(ct_afmask, hec.rot(ct_afmask,      num_slot_dis1));
         // #2旋转求和
         for (int i = 0; i < log2(num_slot_dis1); i++) {
-            #pragma omp parallel sections
-            {
-                #pragma omp section
-                {
-                    hec.add_inplace(ct_bemask1, hec.rot(ct_bemask1, pow(2, i)));
-                    hec.add_inplace(ct_afmask1, hec.rot(ct_afmask1, pow(2, i)));
-                }
-                #pragma omp section
-                {
-                    hec.add_inplace(ct_bemask2, hec.rot(ct_bemask2, pow(2, i)));
-                    hec.add_inplace(ct_afmask2, hec.rot(ct_afmask2, pow(2, i)));
-                }
-                #pragma omp section
-                {
-                    hec.add_inplace(ct_bemask3, hec.rot(ct_bemask3, pow(2, i)));
-                    hec.add_inplace(ct_afmask3, hec.rot(ct_afmask3, pow(2, i)));
-                }
-                #pragma omp section
-                {
-                    hec.add_inplace(ct_bemask4, hec.rot(ct_bemask4, pow(2, i)));
-                    hec.add_inplace(ct_afmask4, hec.rot(ct_afmask4, pow(2, i)));
-                }
-            }
+            hec.add_inplace(ct_bemask, hec.rot(ct_bemask, pow(2, i)));
+            hec.add_inplace(ct_afmask, hec.rot(ct_afmask, pow(2, i)));
         }
         // #3后处理
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                ct_bemask1 = hec.mult(ct_bemask1, pt_bemask);
-                ct_afmask1 = hec.mult(ct_afmask1, pt_bemask);
-                ct_afmask1 = hec.rot(ct_afmask1, -32);
+        ct_bemask = hec.mult(ct_bemask, pt_bemask);
+        ct_afmask = hec.mult(ct_afmask, pt_bemask);
+        ct_afmask = hec.rot(ct_afmask, -1 * num_slot_dis1);
 
-                ctdistance1_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask1, ct_afmask1), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-                auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance1_rep->GetLevel(), num_slot);
-                ctdistance1_exp = hec.mult(ctdistance1_rep, pt_rep2exp_mask);
-            }
-            #pragma omp section
-            {
-                ct_bemask2 = hec.mult(ct_bemask2, pt_bemask);
-                ct_afmask2 = hec.mult(ct_afmask2, pt_bemask);
-                ct_afmask2 = hec.rot(ct_afmask2, -32);
-
-                ctdistance2_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask2, ct_afmask2), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-                auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance2_rep->GetLevel(), num_slot);
-                ctdistance2_exp = hec.mult(ctdistance2_rep, pt_rep2exp_mask);
-            }
-            #pragma omp section
-            {
-                ct_bemask3 = hec.mult(ct_bemask3, pt_bemask);
-                ct_afmask3 = hec.mult(ct_afmask3, pt_bemask);
-                ct_afmask3 = hec.rot(ct_afmask3, -32);
-
-                ctdistance3_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask3, ct_afmask3), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-                auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance3_rep->GetLevel(), num_slot);
-                ctdistance3_exp = hec.mult(ctdistance3_rep, pt_rep2exp_mask);
-            }
-            #pragma omp section
-            {
-                ct_bemask4 = hec.mult(ct_bemask4, pt_bemask);
-                ct_afmask4 = hec.mult(ct_afmask4, pt_bemask);
-                ct_afmask4 = hec.rot(ct_afmask4, -32);
-
-                ctdistance4_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask4, ct_afmask4), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-            }
-        }
+        ctdistance_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
+                                    hec.add(ct_bemask, ct_afmask), lowbound_dis, upbound_dis, sqrt_cheb_degree);
+        auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance_rep->GetLevel(), num_slot);
+        ctdistance_exp = hec.mult(ctdistance_rep, pt_rep2exp_mask);
     }
-    cout << "Comsumed depth is: " << ctdistance1_rep->GetLevel() << endl;
-    cout << "Current depth is: " << levels_required - ctdistance1_rep->GetLevel() << endl;
+    cout << "Comsumed depth is: " << ctdistance_rep->GetLevel() << endl;
+    cout << "Current depth is: " << levels_required - ctdistance_rep->GetLevel() << endl;
     
-    // 从repeat形式中提取标准距离（每32个取第一个）
+    // 从repeat形式中提取标准距离（每128个取第一个）
     vector<double> distance_extract_mask(num_slot, 0.0);
-    for (int i = 0; i < 32; i++) {
-        distance_extract_mask[i * 32] = 1.0;  // 每32个数的第一个为1
+    for (int i = 0; i < num_slot_dis1; i++) {
+        distance_extract_mask[i * num_slot_dis1] = 1.0;  // 每128个数的第一个为1
     }
     Plain pt_extract_mask = hec.encode(distance_extract_mask, 1, 
-                                       ctdistance1_rep->GetLevel(), num_slot);
-    
+                                       ctdistance_rep->GetLevel(), num_slot);
+
     // 提取标准形式的距离
-    Cipher ctdistance1_standard, ctdistance2_standard, ctdistance3_standard;
+    Cipher ctdistance_standard;
     {
         Timer timer("Extracting standard distances");
-        
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                // 提取group1的32个距离值
-                ctdistance1_standard = hec.mult(ctdistance1_rep, pt_extract_mask);
-            }
-            
-            #pragma omp section
-            {
-                // 提取group2的32个距离值
-                ctdistance2_standard = hec.mult(ctdistance2_rep, pt_extract_mask);
-            }
-            
-            #pragma omp section
-            {
-                // 提取group3的32个距离值
-                ctdistance3_standard = hec.mult(ctdistance3_rep, pt_extract_mask);
-            }
-        }
+        // 提取group1的100个距离值
+        ctdistance_standard = hec.mult(ctdistance_rep, pt_extract_mask);
+
         cout << "Standard distances extracted" << endl;
     }
                                    
@@ -1104,26 +866,12 @@ int main() {
         Timer timer("Expand Ciphertext");
         // 旋转求和
         for (int i = 0; i < log2(num_slot_dis1); i++) {
-                #pragma omp parallel sections
-                {
-                    #pragma omp section
-                    {
-                        hec.add_inplace(ctdistance1_exp, hec.rot(ctdistance1_exp, num_slot_dis1 * pow(2, i)));
-                    }
-                    #pragma omp section
-                    {
-                        hec.add_inplace(ctdistance2_exp, hec.rot(ctdistance2_exp, num_slot_dis1 * pow(2, i)));
-                    }
-                    #pragma omp section
-                    {
-                        hec.add_inplace(ctdistance3_exp, hec.rot(ctdistance3_exp, num_slot_dis1 * pow(2, i)));
-                    }
-                }
-            }
+            hec.add_inplace(ctdistance_exp, hec.rot(ctdistance_exp, num_slot_dis1 * pow(2, i)));
+        }
     }
 
-    cout << "Comsumed depth is: " << ctdistance1_exp->GetLevel() << endl;
-    cout << "Current depth is: " << levels_required - ctdistance1_exp->GetLevel() << endl;
+    cout << "Comsumed depth is: " << ctdistance_exp->GetLevel() << endl;
+    cout << "Current depth is: " << levels_required - ctdistance_exp->GetLevel() << endl;
 
 
     /**
@@ -1145,7 +893,7 @@ int main() {
 
     // 3. 验证提取的标准距离（可选，用于调试）
     if (sorting_params.verbose) {
-        Plain test_standard1 = hec.decrypt(ctdistance1_standard);
+        Plain test_standard1 = hec.decrypt(ctdistance_standard);
         vector<double> test_values = hec.decode(test_standard1);
         cout << "Standard distances for Group 1 (first 10): ";
         for (int i = 0; i < min(10, 32); i++) {
@@ -1158,45 +906,16 @@ int main() {
     cout << "\n=== Creating Permutation Sorter ===" << endl;
     auto sorter = SortingMethod::Create(sorting_params.method, hec, sorting_params);
 
-    // 5. 执行排序
-    Cipher sorted_group1, sorted_group2, sorted_group3;
-    {
-        Timer timer("Permutation sorting for all groups");
-        
-        cout << "\n=== Starting Permutation-based Sorting ===" << endl;
-        cout << "Vector size: " << sorting_params.vectorSize << endl;
-        cout << "Precision: " << sorting_params.precision << endl;
-        cout << "Sigmoid scaling: " << sorting_params.sigmoidScaling << endl;
-        cout << "Sigmoid degree: " << sorting_params.sigmoidDegree << endl;
-        cout << "Sinc degree: " << sorting_params.sincDegree << endl;
-        
-        // 为了更好的调试，我们先单独处理一个组
-        {
-            Timer timer_g1("Sorting Group 1");
-            cout << "\nSorting Group 1..." << endl;
-            
-            // 创建SortingInput
-            SortingInput input1(ctdistance1_standard, ctdistance1_exp, ctdistance1_rep);
-            
-            // 执行排序
-            sorted_group1 = sorter->Sort(input1, sorting_params);
-            
-            cout << "Group 1 sorting completed" << endl;
-            cout << "Result level: " << sorted_group1->GetLevel() << endl;
-        }
-    }
-
-    
     // 解密结果
     Plain result1, result2, result3, result4;
     
     {
         Timer timer("Decryption");
         
-        result1 = hec.decrypt(sorted_group1);
-        result2 = hec.decrypt(ctdistance2_exp);
-        result3 = hec.decrypt(ctdistance3_exp);
-        result4 = hec.decrypt(ctdistance1_rep);
+        result1 = hec.decrypt(ctdistance_exp);
+        result2 = hec.decrypt(ctdistance_rep);
+        // result3 = hec.decrypt(ctdistance3_exp);
+        // result4 = hec.decrypt(ctdistance1_rep);
     }
 
     // result1->SetLength(static_cast<size_t>(num_slot_dis1));
@@ -1206,8 +925,8 @@ int main() {
 
     cout << "result1:" << result1 << endl;
     cout << "result2:" << result2 << endl;
-    cout << "result3:" << result3 << endl;
-    cout << "result4:" << result4 << endl;
+    // cout << "result3:" << result3 << endl;
+    // cout << "result4:" << result4 << endl;
 
 
     auto total_end = chrono::high_resolution_clock::now();

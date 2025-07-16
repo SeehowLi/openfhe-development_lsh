@@ -2,7 +2,7 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-07-11 20:23:55
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-07-12 15:26:05
+ * @LastEditTime: 2025-07-16 15:25:45
  * @FilePath: \openfhe-development\src\pke\lib\homoencrypt-compute.cpp
  * @Description: 
  * 
@@ -125,6 +125,80 @@ void HomoEncryptCompute::generate_context_permutation(int num_slots, int levels_
 
 }
 
+// 设置KNN的加密参数和context
+void HomoEncryptCompute::generate_context_knn(int num_slots, int levels_required, uint32_t ring_dim, bool toy){
+    CCParams<CryptoContextCKKSRNS> parameters;
+    
+    parameters.SetSecretKeyDist(lbcrypto::UNIFORM_TERNARY);
+
+    int dcrtBits = 45;
+    int firstMod = 48;
+
+    if (toy) {
+        parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
+        parameters.SetRingDim(ring_dim);
+        cout << "num_slots: " << num_slots << endl;
+    } else {
+        // 安全强度设置
+        parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
+        parameters.SetRingDim(1 << 16);
+    }
+
+    cout << "N: " << parameters.GetRingDim() << endl;
+
+    parameters.SetBatchSize(num_slots);
+
+    ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+
+    parameters.SetScalingModSize(dcrtBits);
+    parameters.SetScalingTechnique(rescaleTech);
+    parameters.SetFirstModSize(firstMod);
+
+    //This keeps memory small, at the cost of increasing the modulus
+    parameters.SetNumLargeDigits(2);
+    // parameters.SetKeySwitchTechnique(HYBRID);
+
+    parameters.SetMultiplicativeDepth(levels_required);
+    
+    // 生成加密上下文
+    context = GenCryptoContext(parameters);
+    context->Enable(PKE);
+    context->Enable(KEYSWITCH);
+    context->Enable(LEVELEDSHE);
+    context->Enable(ADVANCEDSHE);
+    context->Enable(FHE);
+
+    key_pair = context->KeyGen();
+    context->EvalMultKeyGen(key_pair.secretKey);
+
+    // 旋转密钥生成
+    #pragma omp parallel sections
+    {
+        #pragma omp section
+        {
+            vector<int> rotations;
+            for (int i = 0; i < log2(128); i++) {
+                rotations.push_back(pow(2, i) * 128);
+            }
+            context->EvalRotateKeyGen(key_pair.secretKey, rotations);
+        }
+        
+        #pragma omp section
+        {
+            vector<int> rotations2;
+            for (int i = 0; i < log2(num_slots); i++) {
+                rotations2.push_back(pow(2, i));
+            }
+            context->EvalRotateKeyGen(key_pair.secretKey, rotations2);
+        }
+        #pragma omp section
+        {
+            context->EvalRotateKeyGen(key_pair.secretKey, {-128, 128});
+        }
+    }
+
+}
+
 // 可以当作测试函数的子函数
 void HomoEncryptCompute::generate_rotation_keys_network(int num_slots) {
     vector<int> rotations;
@@ -146,14 +220,25 @@ void HomoEncryptCompute::generate_rotation_key(int index) {
     context->EvalRotateKeyGen(key_pair.secretKey, rotations);
 }
 
-// 放在主函数
+void HomoEncryptCompute::generate_rotation_key(vector<int> rotations) {
+    context->EvalRotateKeyGen(key_pair.secretKey, rotations);
+}
+
+// 编码
 Plain HomoEncryptCompute::encode(const vector<double> &vec, int level, int num_slots) {
     Plain p = context->MakeCKKSPackedPlaintext(vec, 1, level, nullptr, num_slots);
     p->SetLength(num_slots);
 
     return p;
 }
-// 放在主函数，上面那个encode的简易版本
+
+Plain HomoEncryptCompute::encode(const vector<double> &vec, size_t scale_deg, int level, int num_slots) {
+    Plain p = context->MakeCKKSPackedPlaintext(vec, scale_deg, level, nullptr, num_slots);
+    p->SetLength(num_slots);
+
+    return p;
+}
+// 加密一个数，复制到全部填满有效槽
 Plain HomoEncryptCompute::encode(double value, int level, int num_slots) {
     if (!context) {
         throw std::runtime_error("Context not initialized in encode");
@@ -161,12 +246,17 @@ Plain HomoEncryptCompute::encode(double value, int level, int num_slots) {
     vector<double> repeated_value;
     for (int i = 0; i < num_slots; i++) repeated_value.push_back(value);
 
-    return encode(repeated_value, level, num_slots);
+    return encode(repeated_value, 1, level, num_slots);
 }
 
-// 加密，主函数
+// 单独加密
+Cipher HomoEncryptCompute::encrypt(const Plain &p) {
+    return context->Encrypt(key_pair.publicKey, p);
+}
+
+// 加密--包括编码
 Cipher HomoEncryptCompute::encrypt(const vector<double> &vec, int level, int num_slots) {
-    Plain p = encode(vec, level, num_slots);
+    Plain p = encode(vec, 1, level, num_slots);
 
     return context->Encrypt(p, key_pair.publicKey);
 }
@@ -181,7 +271,7 @@ Cipher HomoEncryptCompute::encrypt_expanded(const vector<double> &vec, int level
         }
     }
 
-    Plain p = encode(repeated, level, num_slots);
+    Plain p = encode(repeated, 1, level, num_slots);
 
     return context->Encrypt(p, key_pair.publicKey);
 }
@@ -196,7 +286,7 @@ Cipher HomoEncryptCompute::encrypt_repeated(const vector<double> &vec, int level
         }
     }
 
-    Plain p = encode(repeated, level, num_slots);
+    Plain p = encode(repeated, 1, level, num_slots);
 
     return context->Encrypt(p, key_pair.publicKey);
 }
@@ -206,7 +296,7 @@ vector<double> HomoEncryptCompute::decode(const Plain& p) {
     return p->GetRealPackedValue();
 }
 
-// 解密，主函数
+// 普通解密
 Plain HomoEncryptCompute::decrypt(const Cipher &c) {
     Plain p;
     context->Decrypt(key_pair.secretKey, c, &p);
@@ -214,18 +304,22 @@ Plain HomoEncryptCompute::decrypt(const Cipher &c) {
     return p;
 }
 
-// 密文加法加法，主函数
+// 密密文加
 Cipher HomoEncryptCompute::add(const Cipher &a, const Cipher &b) {
     return context->EvalAdd(a, b);
 }
 
-// 明密文加法，主函数
+// 明密文加法
 Cipher HomoEncryptCompute::add(const Cipher &a, const Plain &b) {
     return context->EvalAdd(a, b);
 }
 
 Cipher HomoEncryptCompute::add(const Cipher &a, double d) {
     return context->EvalAdd(a, encode(d, a->GetLevel(), a->GetSlots()));
+}
+
+void HomoEncryptCompute::add_inplace(Cipher &a, const Cipher &b) {
+    context->EvalAddInPlace(a, b);
 }
 
 Cipher HomoEncryptCompute::add_tree(vector<Cipher> v) {
@@ -252,6 +346,10 @@ Cipher HomoEncryptCompute::mult(const Cipher &c, double v) {
     return context->EvalMult(c, encode(v, c->GetLevel(), c->GetSlots()));
 }
 
+Cipher HomoEncryptCompute::square(const Cipher &c1) {
+    return context->EvalSquare(c1);
+}
+
 Cipher HomoEncryptCompute::rot(const Cipher& c, int index) {
     return context->EvalRotate(c, index);
 }
@@ -269,6 +367,15 @@ Cipher HomoEncryptCompute::rotsum(const Cipher &in, int n) {
     }
 
     return result;
+}
+
+Cipher HomoEncryptCompute::chebyshev(std::function<double(double)> func,
+                     const Cipher& ciphertext, double a,
+                     double b, uint32_t degree){
+    if (!context) {
+        throw std::runtime_error("Context not initialized");
+    }
+    return context->EvalChebyshevFunction(func, ciphertext, a, b, degree);
 }
 
 // 重点的函数近似

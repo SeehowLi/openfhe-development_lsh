@@ -2,7 +2,7 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-07-11 19:59:21
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-07-11 20:30:51
+ * @LastEditTime: 2025-07-16 13:10:12
  * @FilePath: \openfhe-development\src\pke\include\homoencrypt-compute.h
  * @Description: 
  * 
@@ -59,6 +59,9 @@ public:
      */
     void generate_context_permutation(int num_slots, int levels_required, bool toy_parameters);
 
+    // KNN的加密网络
+    void generate_context_knn(int num_slots, int levels_required, uint32_t ring_dim, bool toy_parameters);
+
     /**
      * Generate a rotation key
      *
@@ -67,17 +70,29 @@ public:
     void generate_rotation_key(int index);
 
     /**
+     * Generate a rotation key
+     *
+     * @param rotations The indices of the rotations
+     */
+    void generate_rotation_key(vector<int> rotations);
+
+    /**
       * Basic FHE operations
       */
 
     // Encode a vector of doubles into a plaintext
     Plain encode(const vector<double>& vec, int level, int num_slots);
 
+    Plain encode(const vector<double>& vec, size_t scale_deg, int level, int num_slots);
+
     // Encodes a value in a plaintext (it will be repeated)
     Plain encode(double value, int level, int num_slots);
 
     // Encrypt a vector of doubles
     Cipher encrypt(const vector<double>& vec, int level = 0, int plaintext_num_slots = 0);
+
+    // 单独加密
+    Cipher encrypt(const Plain& p);
 
     // Encrypt a vector in expanded encoding
     Cipher encrypt_expanded(const vector<double>& vec, int level = 0, int plaintext_num_slots = 0, int repetitions = 1);
@@ -96,6 +111,7 @@ public:
     Cipher add(const Cipher& c1, const Cipher& c2);
     Cipher add(const Cipher& c, const Plain& p);
     Cipher add(const Cipher& c, double d);
+    void add_inplace(Cipher& c1, const Cipher& c2);
 
     // Add multiple ciphertexts using a tree structure
     Cipher add_tree(vector<Cipher> v);
@@ -109,6 +125,9 @@ public:
     Cipher mult(const Cipher& c, double d);
     Cipher mult(const Cipher& c1, const Cipher& c2);
 
+    // square
+    Cipher square(const Cipher& c1);
+
     // Rotate a ciphertext by a specified index
     Cipher rot(const Cipher& c, int index);
 
@@ -118,6 +137,10 @@ public:
     /**
       * Permutation-based operations
       */
+    // 切比雪夫多项式近似
+    Cipher chebyshev(std::function<double(double)> func,
+                     const Cipher& ciphertext, double a,
+                     double b, uint32_t degree);
 
     // Approximation of the k-scaled Sigmoid
     Cipher sigmoid(const Cipher& in, int n, int degree, int scaling);

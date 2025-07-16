@@ -11,6 +11,9 @@
 #include "nonlinearfunction/sorting-utils.h"
 
 using namespace lbcrypto;
+using namespace std;
+using namespace std::chrono;
+
 
 // 全局变量
 HomoEncryptCompute hec;
@@ -18,7 +21,7 @@ vector<double> input_values;
 int n = 32;
 double delta = 0.001;
 int precision_digits = 3;
-bool toy = true;
+bool toy = false;
 SortingType sortingType = NONE;
 
 // 全局变量来存储数据
@@ -50,7 +53,7 @@ public:
     ~Timer() {
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        cout << "[TIMING] " << task_name << ": " << duration.count() << " ms" << std::endl;
+        std::cout << "[TIMING] " << task_name << ": " << duration.count() << " ms" << std::endl;
     }
 };
 
@@ -85,7 +88,7 @@ void normalize_query_and_training() {
     // 现在假设数据分布的最大值是10.0
     double max_val = 10.0;
     double max_distance = sqrt(10.0) * 2 * max_val; // 计算最大距离，用于归一化
-    cout << "Max distance for normalization: " << max_distance << std::endl;
+    std::cout << "Max distance for normalization: " << max_distance << std::endl;
 
     // OpenMP并行归一化
     #pragma omp parallel sections
@@ -754,9 +757,9 @@ int main() {
     // 加密参数设置
     int num_slot_dis1 = 32;// 前三组group中有效距离的个数
     int num_slot_dis2 = 4; // 最后一组group中有效距离的个数
-    // int num_dim = 16; // 每个group的维度
+    int num_dim = 16; // 每个group的维度
     int num_slot = num_slot_dis1 * num_slot_dis1; // 最终的槽数1024
-    // int num_slots1 = num_slot_dis1 * num_dim;
+    int num_slots1 = num_slot_dis1 * num_dim;
     // int num_slots2 = num_slot_dis2 * num_dim;
     // =============== 重要参数 =============== //
     int levels_required = 45;
@@ -775,441 +778,452 @@ int main() {
     distance_mask2.resize(num_slot, 0.0);
 
     // ============================ 针对32槽的加密上下文 ============================ //
-    {
-        Timer timer("Generating crypto context and rotation keys");
-        hec.generate_context_knn(num_slot, levels_required, ring_dim, toy);
+    CCParams<CryptoContextCKKSRNS> parameters;
+
+    parameters.SetSecretKeyDist(lbcrypto::UNIFORM_TERNARY);
+
+    int dcrtBits = 45;
+    int firstMod = 48;
+
+    if (toy) {
+        parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
+
+        if (num_slots1 <= 1 << 14) parameters.SetRingDim(1 << 15);
+        if (num_slots1 <= 1 << 13) parameters.SetRingDim(1 << 14);
+        if (num_slots1 <= 1 << 12) parameters.SetRingDim(1 << 13);
+        if (num_slots1 <= 1 << 11) parameters.SetRingDim(1 << 12);
+
+        cout << "n: " << num_slots1 << endl;
+    } else {
+        // 安全强度设置
+        // parameters.SetSecurityLevel(lbcrypto::HEStd_128_classic);
+        parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
+        parameters.SetRingDim(ring_dim);
     }
-    
-    /**
-    *@brief 初始数据编码成明文向量
-    */
-    Plain ptxt1, ptxt2, ptxt3, ptxt4, ptxt_query32, ptxt_query4;
+
+    cout << "N: " << parameters.GetRingDim() << endl;
+
+    parameters.SetBatchSize(num_slot);
+
+    ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+
+    parameters.SetScalingModSize(dcrtBits);
+    parameters.SetScalingTechnique(rescaleTech);
+    parameters.SetFirstModSize(firstMod);
+
+    //This keeps memory small, at the cost of increasing the modulus
+    parameters.SetNumLargeDigits(2);
+
+    parameters.SetMultiplicativeDepth(levels_required);
+
+    // 生成加密上下文
     {
-        Timer timer("Encoding plaintexts");
-        
-        #pragma omp parallel sections
+        Timer timer("Generating crypto context");
+        auto context = GenCryptoContext(parameters);
+        context->Enable(PKE);
+        context->Enable(KEYSWITCH);
+        context->Enable(LEVELEDSHE);
+        context->Enable(ADVANCEDSHE);
+        context->Enable(FHE);
+
+        auto key_pair = context->KeyGen();
+
+        context->EvalMultKeyGen(key_pair.secretKey);
+
+        // 生成旋转密钥--for permutation,计算欧氏距离,获得紧凑距离
+        // TODO:后面需要调整,有一些不需要或者生成的密钥多了
         {
-            #pragma omp section
-            {
-                ptxt1 = hec.encode(group1_1d, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Group1 encode success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ptxt2 =  hec.encode(group2_1d, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Group2 encode success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ptxt3 =  hec.encode(group3_1d, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Group3 encode success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ptxt4 =  hec.encode(group4_1d, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Group4 encode success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ptxt_query32 =  hec.encode(query_data_exp32, 1, 1, num_slot);
-                #pragma omp critical
-                cout << "Query32 encode success!" << endl;
-            }
-        }
-    }
-
-    /**
-    *@brief 初始数据加密
-    */
-    Cipher ctgr1, ctgr2, ctgr3, ctgr4, ctqry32, ctqry4;
-    
-    {
-        Timer timer("Encrypting data");
-        
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                ctgr1 = hec.encrypt(ptxt1);
-                #pragma omp critical
-                cout << "Group1 encrypt success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ctgr2 = hec.encrypt(ptxt2);
-                #pragma omp critical
-                cout << "Group2 encrypt success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ctgr3 = hec.encrypt(ptxt3);
-                #pragma omp critical
-                cout << "Group3 encrypt success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ctgr4 = hec.encrypt(ptxt4);
-                #pragma omp critical
-                cout << "Group4 encrypt success!" << endl;
-            }
-            
-            #pragma omp section
-            {
-                ctqry32 = hec.encrypt(ptxt_query32);
-                #pragma omp critical
-                cout << "Query32 encrypt success!" << endl;
-            }
-        }
-    }
-    cout << "Current depth is: " << levels_required - ctgr1->GetLevel() << endl;
-
-    /**
-    *@brief 欧式距离计算
-    */
-    // 减法做差
-    Cipher ctminus1, ctminus2, ctminus3, ctminus4;
-    
-    {
-        Timer timer("Subtraction");
-        
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            ctminus1 = hec.sub(ctgr1, ctqry32);
-            
-            #pragma omp section
-            ctminus2 = hec.sub(ctgr2, ctqry32);
-
-            #pragma omp section
-            ctminus3 = hec.sub(ctgr3, ctqry32);
-
-            #pragma omp section
-            ctminus4 = hec.sub(ctgr4, ctqry32);
-        }
-        cout << "Subtraction done!" << endl;
-    }
-
-    // 平方
-    Cipher ctminus1_square, ctminus2_square, ctminus3_square, ctminus4_square;
-    
-    {
-        Timer timer("Squaring");
-        
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            ctminus1_square =  hec.square(ctminus1);
-            
-            #pragma omp section
-            ctminus2_square = hec.square(ctminus2);
-            
-            #pragma omp section
-            ctminus3_square = hec.square(ctminus3);
-            
-            #pragma omp section
-            ctminus4_square = hec.square(ctminus4);
-        }
-        cout << "Square done!" << endl;
-    }
-    cout << "Current depth is: " << levels_required - ctminus1_square->GetLevel() << endl;
-
-    // 旋转预处理--折半处理
-    // TODO:需要新的旋转密钥--放到前面的并行处理
-    vector<double> bemask(1024),afmask(1024);
-    for (int i = 0; i < 1024; i++) {
-        bemask[i] = ((i / 32) % 2 == 0) ? 1.0 : 0.0;  // 先32个1，再32个0
-        afmask[i] = ((i / 32) % 2 == 1) ? 1.0 : 0.0;  // 先32个0，再32个1
-    }
-    auto pt_bemask = hec.encode(bemask, 1, ctminus1_square->GetLevel(), num_slot);
-    auto pt_afmask = hec.encode(afmask, 1, ctminus1_square->GetLevel(), num_slot);
-    
-    vector<double> rep2exp_mask(num_slot, 0.0);
-    // 掩码的生成，每一组32个数，第x组的第x个数是1，其余是0
-    for (int i = 0; i < 32; i++) {
-        rep2exp_mask[i * 32 + i] = 1.0;
-    }
-
-    /**
-     * @brief 计算repeat和expand
-     */
-    Cipher ct_bemask1, ct_afmask1; Cipher ct_bemask2, ct_afmask2;
-    Cipher ct_bemask3, ct_afmask3; Cipher ct_bemask4, ct_afmask4;
-    Cipher ctdistance1_rep,ctdistance2_rep,ctdistance3_rep,ctdistance4_rep;
-    Cipher ctdistance1_exp,ctdistance2_exp,ctdistance3_exp,ctdistance4_exp;
-    {
-        Timer timer("Expand Ciphertext");
-        // #1先填满
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                ct_bemask1 = hec.mult(ctminus1_square, pt_bemask);
-                ct_afmask1 = hec.mult(ctminus1_square, pt_afmask);
-                
-                hec.add_inplace(ct_bemask1, hec.rot(ct_bemask1, -32));
-                hec.add_inplace(ct_afmask1, hec.rot(ct_afmask1,  32));
-            }
-            #pragma omp section
-            {
-                ct_bemask2 = hec.mult(ctminus2_square, pt_bemask);
-                ct_afmask2 = hec.mult(ctminus2_square, pt_afmask);
-                hec.add_inplace(ct_bemask2, hec.rot(ct_bemask2, -32));
-                hec.add_inplace(ct_afmask2, hec.rot(ct_afmask2,  32));
-            }
-            #pragma omp section
-            {
-                ct_bemask3 = hec.mult(ctminus3_square, pt_bemask);
-                ct_afmask3 = hec.mult(ctminus3_square, pt_afmask);
-
-                hec.add_inplace(ct_bemask3, hec.rot(ct_bemask3, -32));
-                hec.add_inplace(ct_afmask3, hec.rot(ct_afmask3,  32));
-            }
-            #pragma omp section
-            {
-                ct_bemask4 = hec.mult(ctminus4_square, pt_bemask);
-                ct_afmask4 = hec.mult(ctminus4_square, pt_afmask);
-
-                hec.add_inplace(ct_bemask4, hec.rot(ct_bemask4, -32));
-                hec.add_inplace(ct_afmask4, hec.rot(ct_afmask4,  32));
-            }
-        }
-        // #2旋转求和
-        for (int i = 0; i < log2(num_slot_dis1); i++) {
+            Timer timer("Generating rotation keys");
             #pragma omp parallel sections
             {
                 #pragma omp section
                 {
-                    hec.add_inplace(ct_bemask1, hec.rot(ct_bemask1, pow(2, i)));
-                    hec.add_inplace(ct_afmask1, hec.rot(ct_afmask1, pow(2, i)));
+                    vector<int> rotations;
+                    for (int i = 0; i < log2(num_slot_dis1); i++) {
+                        rotations.push_back(pow(2, i) * num_slot_dis1);
+                    }
+                    context->EvalRotateKeyGen(key_pair.secretKey, rotations);
                 }
+                
                 #pragma omp section
                 {
-                    hec.add_inplace(ct_bemask2, hec.rot(ct_bemask2, pow(2, i)));
-                    hec.add_inplace(ct_afmask2, hec.rot(ct_afmask2, pow(2, i)));
+                    vector<int> rotations2;
+                    for (int i = 0; i < log2(num_slot); i++) {
+                        rotations2.push_back(pow(2, i));
+                    }
+                    context->EvalRotateKeyGen(key_pair.secretKey, rotations2);
                 }
+                // #pragma omp section // 好像不需要了
+                // {
+                //     vector<int> rotations3;
+                //     for (int i = 0; i < log2(num_slot) + 1; i++) {
+                //         rotations3.push_back(pow(2, i) * (num_dim - 1));
+                //         if(i == log2(num_slot_dis1)){
+                //             rotations3.push_back((num_dim - 1) * (num_dim - 1));
+                //         }
+                //     }
+                //     context->EvalRotateKeyGen(key_pair.secretKey, rotations3);
+                // }
                 #pragma omp section
                 {
-                    hec.add_inplace(ct_bemask3, hec.rot(ct_bemask3, pow(2, i)));
-                    hec.add_inplace(ct_afmask3, hec.rot(ct_afmask3, pow(2, i)));
-                }
-                #pragma omp section
-                {
-                    hec.add_inplace(ct_bemask4, hec.rot(ct_bemask4, pow(2, i)));
-                    hec.add_inplace(ct_afmask4, hec.rot(ct_afmask4, pow(2, i)));
+                    context->EvalRotateKeyGen(key_pair.secretKey, {-32, 32});
                 }
             }
         }
-        // #3后处理
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                ct_bemask1 = hec.mult(ct_bemask1, pt_bemask);
-                ct_afmask1 = hec.mult(ct_afmask1, pt_bemask);
-                ct_afmask1 = hec.rot(ct_afmask1, -32);
 
-                ctdistance1_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask1, ct_afmask1), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-                auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance1_rep->GetLevel(), num_slot);
-                ctdistance1_exp = hec.mult(ctdistance1_rep, pt_rep2exp_mask);
-            }
-            #pragma omp section
-            {
-                ct_bemask2 = hec.mult(ct_bemask2, pt_bemask);
-                ct_afmask2 = hec.mult(ct_afmask2, pt_bemask);
-                ct_afmask2 = hec.rot(ct_afmask2, -32);
-
-                ctdistance2_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask2, ct_afmask2), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-                auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance2_rep->GetLevel(), num_slot);
-                ctdistance2_exp = hec.mult(ctdistance2_rep, pt_rep2exp_mask);
-            }
-            #pragma omp section
-            {
-                ct_bemask3 = hec.mult(ct_bemask3, pt_bemask);
-                ct_afmask3 = hec.mult(ct_afmask3, pt_bemask);
-                ct_afmask3 = hec.rot(ct_afmask3, -32);
-
-                ctdistance3_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask3, ct_afmask3), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-                auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance3_rep->GetLevel(), num_slot);
-                ctdistance3_exp = hec.mult(ctdistance3_rep, pt_rep2exp_mask);
-            }
-            #pragma omp section
-            {
-                ct_bemask4 = hec.mult(ct_bemask4, pt_bemask);
-                ct_afmask4 = hec.mult(ct_afmask4, pt_bemask);
-                ct_afmask4 = hec.rot(ct_afmask4, -32);
-
-                ctdistance4_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                            hec.add(ct_bemask4, ct_afmask4), lowbound_dis, upbound_dis, sqrt_cheb_degree);
-            }
-        }
-    }
-    cout << "Comsumed depth is: " << ctdistance1_rep->GetLevel() << endl;
-    cout << "Current depth is: " << levels_required - ctdistance1_rep->GetLevel() << endl;
-    
-    // 从repeat形式中提取标准距离（每32个取第一个）
-    vector<double> distance_extract_mask(num_slot, 0.0);
-    for (int i = 0; i < 32; i++) {
-        distance_extract_mask[i * 32] = 1.0;  // 每32个数的第一个为1
-    }
-    Plain pt_extract_mask = hec.encode(distance_extract_mask, 1, 
-                                       ctdistance1_rep->GetLevel(), num_slot);
-    
-    // 提取标准形式的距离
-    Cipher ctdistance1_standard, ctdistance2_standard, ctdistance3_standard;
-    {
-        Timer timer("Extracting standard distances");
+        /**
+        *@brief 初始数据编码成明文向量
+        */
+        Plain ptxt1, ptxt2, ptxt3, ptxt4, ptxt_query32, ptxt_query4;
         
-        #pragma omp parallel sections
         {
-            #pragma omp section
-            {
-                // 提取group1的32个距离值
-                ctdistance1_standard = hec.mult(ctdistance1_rep, pt_extract_mask);
-            }
+            Timer timer("Encoding plaintexts");
             
-            #pragma omp section
+            #pragma omp parallel sections
             {
-                // 提取group2的32个距离值
-                ctdistance2_standard = hec.mult(ctdistance2_rep, pt_extract_mask);
-            }
-            
-            #pragma omp section
-            {
-                // 提取group3的32个距离值
-                ctdistance3_standard = hec.mult(ctdistance3_rep, pt_extract_mask);
+                #pragma omp section
+                {
+                    ptxt1 = context->MakeCKKSPackedPlaintext(group1_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt1->SetLength(num_slot);
+                    #pragma omp critical
+                    cout << "Group1 encode success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ptxt2 = context->MakeCKKSPackedPlaintext(group2_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt2->SetLength(num_slot);
+                    #pragma omp critical
+                    cout << "Group2 encode success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ptxt3 = context->MakeCKKSPackedPlaintext(group3_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt3->SetLength(num_slot);
+                    #pragma omp critical
+                    cout << "Group3 encode success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ptxt4 = context->MakeCKKSPackedPlaintext(group4_1d, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt4->SetLength(num_slot);
+                    #pragma omp critical
+                    cout << "Group4 encode success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ptxt_query32 = context->MakeCKKSPackedPlaintext(query_data_exp32, 1, 1, nullptr, static_cast<size_t>(num_slot));
+                    ptxt_query32->SetLength(num_slot);
+                    #pragma omp critical
+                    cout << "Query32 encode success!" << endl;
+                }
             }
         }
-        cout << "Standard distances extracted" << endl;
-    }
-                                   
-    /**
-     * @brief 计算expand
-     */
-    // 利用repeat生成expand--不需要算第四组的
-    {
-        Timer timer("Expand Ciphertext");
-        // 旋转求和
-        for (int i = 0; i < log2(num_slot_dis1); i++) {
+        // cout << "ptxt1:" << ptxt1 << endl;
+        // cout << "ptxt_query32:" << ptxt_query32 << endl;
+
+        /**
+        *@brief 初始数据加密
+        */
+        Cipher ctgr1, ctgr2, ctgr3, ctgr4, ctqry32, ctqry4;
+        
+        {
+            Timer timer("Encrypting data");
+            
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                {
+                    ctgr1 = context->Encrypt(key_pair.publicKey, ptxt1);
+                    #pragma omp critical
+                    cout << "Group1 encrypt success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ctgr2 = context->Encrypt(key_pair.publicKey, ptxt2);
+                    #pragma omp critical
+                    cout << "Group2 encrypt success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ctgr3 = context->Encrypt(key_pair.publicKey, ptxt3);
+                    #pragma omp critical
+                    cout << "Group3 encrypt success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ctgr4 = context->Encrypt(key_pair.publicKey, ptxt4);
+                    #pragma omp critical
+                    cout << "Group4 encrypt success!" << endl;
+                }
+                
+                #pragma omp section
+                {
+                    ctqry32 = context->Encrypt(key_pair.publicKey, ptxt_query32);
+                    #pragma omp critical
+                    cout << "Query32 encrypt success!" << endl;
+                }
+            }
+        }
+
+        cout << "Current depth is: " << levels_required - ctgr1->GetLevel() << endl;
+
+        /**
+        *@brief 欧式距离计算
+        */
+        // 减法做差
+        Cipher ctminus1, ctminus2, ctminus3, ctminus4;
+        
+        {
+            Timer timer("Subtraction");
+            
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                ctminus1 = context->EvalSub(ctgr1, ctqry32);
+                
+                #pragma omp section
+                ctminus2 = context->EvalSub(ctgr2, ctqry32);
+                
+                #pragma omp section
+                ctminus3 = context->EvalSub(ctgr3, ctqry32);
+                
+                #pragma omp section
+                ctminus4 = context->EvalSub(ctgr4, ctqry32);
+            }
+            cout << "Subtraction done!" << endl;
+        }
+
+        // 平方
+        Cipher ctminus1_square, ctminus2_square, ctminus3_square, ctminus4_square;
+        
+        {
+            Timer timer("Squaring");
+            
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                ctminus1_square = context->EvalSquare(ctminus1);
+                
+                #pragma omp section
+                ctminus2_square = context->EvalSquare(ctminus2);
+                
+                #pragma omp section
+                ctminus3_square = context->EvalSquare(ctminus3);
+                
+                #pragma omp section
+                ctminus4_square = context->EvalSquare(ctminus4);
+            }
+            cout << "Square done!" << endl;
+        }
+        cout << "Current depth is: " << levels_required - ctminus1_square->GetLevel() << endl;
+        
+        // 旋转预处理--折半处理
+        // TODO:需要新的旋转密钥--放到前面的并行处理
+        vector<double> bemask(1024),afmask(1024);
+        for (int i = 0; i < 1024; i++) {
+            bemask[i] = ((i / 32) % 2 == 0) ? 1.0 : 0.0;  // 先32个1，再32个0
+            afmask[i] = ((i / 32) % 2 == 1) ? 1.0 : 0.0;  // 先32个0，再32个1
+        }
+        auto pt_bemask = context->MakeCKKSPackedPlaintext(bemask, 1, ctminus1_square->GetLevel(), nullptr, num_slot);
+        auto pt_afmask = context->MakeCKKSPackedPlaintext(afmask, 1, ctminus1_square->GetLevel(), nullptr, num_slot);
+        
+        vector<double> rep2exp_mask(num_slot, 0.0);
+        // 掩码的生成，每一组32个数，第x组的第x个数是1，其余是0
+        for (int i = 0; i < 32; i++) {
+            rep2exp_mask[i * 32 + i] = 1.0;
+        }
+
+        /**
+         * @brief 计算repeat和expand
+         */
+        Cipher ct_bemask1, ct_afmask1; Cipher ct_bemask2, ct_afmask2;
+        Cipher ct_bemask3, ct_afmask3; Cipher ct_bemask4, ct_afmask4;
+        Cipher ctdistance1_rep,ctdistance2_rep,ctdistance3_rep,ctdistance4_rep;
+        Cipher ctdistance1_exp,ctdistance2_exp,ctdistance3_exp,ctdistance4_exp;
+        {
+            Timer timer("Expand Ciphertext");
+            // #1先填满
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                {
+                    ct_bemask1 = context->EvalMult(ctminus1_square, pt_bemask);
+                    ct_afmask1 = context->EvalMult(ctminus1_square, pt_afmask);
+                    
+                    context->EvalAddInPlace(ct_bemask1, context->EvalRotate(ct_bemask1, -32));
+                    context->EvalAddInPlace(ct_afmask1, context->EvalRotate(ct_afmask1,  32));
+                }
+                #pragma omp section
+                {
+                    ct_bemask2 = context->EvalMult(ctminus2_square, pt_bemask);
+                    ct_afmask2 = context->EvalMult(ctminus2_square, pt_afmask);
+                    
+                    context->EvalAddInPlace(ct_bemask2, context->EvalRotate(ct_bemask2, -32));
+                    context->EvalAddInPlace(ct_afmask2, context->EvalRotate(ct_afmask2,  32));
+                }
+                #pragma omp section
+                {
+                    ct_bemask3 = context->EvalMult(ctminus3_square, pt_bemask);
+                    ct_afmask3 = context->EvalMult(ctminus3_square, pt_afmask);
+                    
+                    context->EvalAddInPlace(ct_bemask3, context->EvalRotate(ct_bemask3, -32));
+                    context->EvalAddInPlace(ct_afmask3, context->EvalRotate(ct_afmask3,  32));
+                }
+                #pragma omp section
+                {
+                    ct_bemask4 = context->EvalMult(ctminus4_square, pt_bemask);
+                    ct_afmask4 = context->EvalMult(ctminus4_square, pt_afmask);
+                    
+                    context->EvalAddInPlace(ct_bemask4, context->EvalRotate(ct_bemask4, -32));
+                    context->EvalAddInPlace(ct_afmask4, context->EvalRotate(ct_afmask4,  32));
+                }
+            }
+            // #2旋转求和
+            for (int i = 0; i < log2(num_slot_dis1); i++) {
                 #pragma omp parallel sections
                 {
                     #pragma omp section
                     {
-                        hec.add_inplace(ctdistance1_exp, hec.rot(ctdistance1_exp, num_slot_dis1 * pow(2, i)));
+                        context->EvalAddInPlace(ct_bemask1, context->EvalRotate(ct_bemask1, pow(2, i)));
+                        context->EvalAddInPlace(ct_afmask1, context->EvalRotate(ct_afmask1, pow(2, i)));
                     }
                     #pragma omp section
                     {
-                        hec.add_inplace(ctdistance2_exp, hec.rot(ctdistance2_exp, num_slot_dis1 * pow(2, i)));
+                        context->EvalAddInPlace(ct_bemask2, context->EvalRotate(ct_bemask2, pow(2, i)));
+                        context->EvalAddInPlace(ct_afmask2, context->EvalRotate(ct_afmask2, pow(2, i)));
                     }
                     #pragma omp section
                     {
-                        hec.add_inplace(ctdistance3_exp, hec.rot(ctdistance3_exp, num_slot_dis1 * pow(2, i)));
+                        context->EvalAddInPlace(ct_bemask3, context->EvalRotate(ct_bemask3, pow(2, i)));
+                        context->EvalAddInPlace(ct_afmask3, context->EvalRotate(ct_afmask3, pow(2, i)));
+                    }
+                    #pragma omp section
+                    {
+                        context->EvalAddInPlace(ct_bemask4, context->EvalRotate(ct_bemask4, pow(2, i)));
+                        context->EvalAddInPlace(ct_afmask4, context->EvalRotate(ct_afmask4, pow(2, i)));
                     }
                 }
             }
-    }
+            // #3后处理
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                {
+                    ct_bemask1 = context->EvalMult(ct_bemask1, pt_bemask);
+                    ct_afmask1 = context->EvalMult(ct_afmask1, pt_bemask);
+                    ct_afmask1 = context->EvalRotate(ct_afmask1, -32);
 
-    cout << "Comsumed depth is: " << ctdistance1_exp->GetLevel() << endl;
-    cout << "Current depth is: " << levels_required - ctdistance1_exp->GetLevel() << endl;
+                    ctdistance1_rep = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+                                                context->EvalAdd(ct_bemask1, ct_afmask1), lowbound_dis, upbound_dis, sqrt_cheb_degree);
+                    auto pt_rep2exp_mask = context->MakeCKKSPackedPlaintext(rep2exp_mask, 1, ctdistance1_rep->GetLevel(), nullptr, num_slot);
+                    ctdistance1_exp = context->EvalMult(ctdistance1_rep, pt_rep2exp_mask);
+                }
+                #pragma omp section
+                {
+                    ct_bemask2 = context->EvalMult(ct_bemask2, pt_bemask);
+                    ct_afmask2 = context->EvalMult(ct_afmask2, pt_bemask);
+                    ct_afmask2 = context->EvalRotate(ct_afmask2, -32);
 
+                    ctdistance2_rep = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+                                                context->EvalAdd(ct_bemask2, ct_afmask2), lowbound_dis, upbound_dis, sqrt_cheb_degree);
+                    auto pt_rep2exp_mask = context->MakeCKKSPackedPlaintext(rep2exp_mask, 1, ctdistance2_rep->GetLevel(), nullptr, num_slot);
+                    ctdistance2_exp = context->EvalMult(ctdistance2_rep, pt_rep2exp_mask);
+                }
+                #pragma omp section
+                {
+                    ct_bemask3 = context->EvalMult(ct_bemask3, pt_bemask);
+                    ct_afmask3 = context->EvalMult(ct_afmask3, pt_bemask);
+                    ct_afmask3 = context->EvalRotate(ct_afmask3, -32);
 
-    /**
-     * @brief 分别计算前三个group的sorting
-     */
-    // 创建排序参数
-    SortingParams sorting_params;
-    sorting_params.method = SortingParams::PERMUTATION;
-    sorting_params.vectorSize = 32;  // 每个group有32个距离值
-    sorting_params.precision = 0.001;  // 使用您设置的delta
-    sorting_params.verbose = false;    // 或者设为true查看详细信息
-    
-    // 根据precision自动设置参数
-    if (sorting_params.precision >= 0.001) {
-        sorting_params.sigmoidScaling = 9170;
-        sorting_params.sigmoidDegree = 16000;
-        sorting_params.sincDegree = 119;  // 对于n=32
-    }
+                    ctdistance3_rep = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+                                                context->EvalAdd(ct_bemask3, ct_afmask3), lowbound_dis, upbound_dis, sqrt_cheb_degree);
+                    auto pt_rep2exp_mask = context->MakeCKKSPackedPlaintext(rep2exp_mask, 1, ctdistance3_rep->GetLevel(), nullptr, num_slot);
+                    ctdistance3_exp = context->EvalMult(ctdistance3_rep, pt_rep2exp_mask);
+                }
+                #pragma omp section
+                {
+                    ct_bemask4 = context->EvalMult(ct_bemask4, pt_bemask);
+                    ct_afmask4 = context->EvalMult(ct_afmask4, pt_bemask);
+                    ct_afmask4 = context->EvalRotate(ct_afmask4, -32);
 
-    // 3. 验证提取的标准距离（可选，用于调试）
-    if (sorting_params.verbose) {
-        Plain test_standard1 = hec.decrypt(ctdistance1_standard);
-        vector<double> test_values = hec.decode(test_standard1);
-        cout << "Standard distances for Group 1 (first 10): ";
-        for (int i = 0; i < min(10, 32); i++) {
-            cout << fixed << setprecision(4) << test_values[i] << " ";
+                    ctdistance4_rep = context->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, 
+                                                context->EvalAdd(ct_bemask4, ct_afmask4), lowbound_dis, upbound_dis, sqrt_cheb_degree);
+                }
+            }
         }
-        cout << endl;
-    }
+        cout << "Comsumed depth is: " << ctdistance1_rep->GetLevel() << endl;
+        cout << "Current depth is: " << levels_required - ctdistance1_rep->GetLevel() << endl;
 
-    // 4. 创建排序器
-    cout << "\n=== Creating Permutation Sorter ===" << endl;
-    auto sorter = SortingMethod::Create(sorting_params.method, hec, sorting_params);
-
-    // 5. 执行排序
-    Cipher sorted_group1, sorted_group2, sorted_group3;
-    {
-        Timer timer("Permutation sorting for all groups");
-        
-        cout << "\n=== Starting Permutation-based Sorting ===" << endl;
-        cout << "Vector size: " << sorting_params.vectorSize << endl;
-        cout << "Precision: " << sorting_params.precision << endl;
-        cout << "Sigmoid scaling: " << sorting_params.sigmoidScaling << endl;
-        cout << "Sigmoid degree: " << sorting_params.sigmoidDegree << endl;
-        cout << "Sinc degree: " << sorting_params.sincDegree << endl;
-        
-        // 为了更好的调试，我们先单独处理一个组
+        /**
+         * @brief 计算expand
+         */
+        // 利用repeat生成expand--不需要算第四组的
         {
-            Timer timer_g1("Sorting Group 1");
-            cout << "\nSorting Group 1..." << endl;
-            
-            // 创建SortingInput
-            SortingInput input1(ctdistance1_standard, ctdistance1_exp, ctdistance1_rep);
-            
-            // 执行排序
-            sorted_group1 = sorter->Sort(input1, sorting_params);
-            
-            cout << "Group 1 sorting completed" << endl;
-            cout << "Result level: " << sorted_group1->GetLevel() << endl;
-        }
-    }
+            Timer timer("Expand Ciphertext");
+            // 旋转求和
+            for (int i = 0; i < log2(num_slot_dis1); i++) {
+                    #pragma omp parallel sections
+                    {
+                        #pragma omp section
+                        {
+                            context->EvalAddInPlace(ctdistance1_exp, context->EvalRotate(ctdistance1_exp, num_slot_dis1 * pow(2, i)));
+                        }
+                        #pragma omp section
+                        {
+                            context->EvalAddInPlace(ctdistance2_exp, context->EvalRotate(ctdistance2_exp, num_slot_dis1 * pow(2, i)));
+                        }
+                        #pragma omp section
+                        {
+                            context->EvalAddInPlace(ctdistance3_exp, context->EvalRotate(ctdistance3_exp, num_slot_dis1 * pow(2, i)));
+                        }
+                    }
+                }
+        }    
+        cout << "Comsumed depth is: " << ctdistance1_exp->GetLevel() << endl;
+        cout << "Current depth is: " << levels_required - ctdistance1_exp->GetLevel() << endl;
 
-    
-    // 解密结果
-    Plain result1, result2, result3, result4;
-    
-    {
-        Timer timer("Decryption");
+
+        /**
+         * @brief 分别计算前三个group的sorting
+         */
+        // 创建排序参数
+        SortingParams sorting_params;
+        sorting_params.method = SortingParams::PERMUTATION;
+        sorting_params.vectorSize = 32;  // 每个group有32个距离值
+        sorting_params.precision = 0.001;  // 使用您设置的delta
+        sorting_params.verbose = false;    // 或者设为true查看详细信息
         
-        result1 = hec.decrypt(sorted_group1);
-        result2 = hec.decrypt(ctdistance2_exp);
-        result3 = hec.decrypt(ctdistance3_exp);
-        result4 = hec.decrypt(ctdistance1_rep);
+        // 解密结果
+        Plain result1, result2, result3, result4;
+        
+        {
+            Timer timer("Decryption");
+            
+            context->Decrypt(key_pair.secretKey, ctdistance1_exp, &result1);
+            context->Decrypt(key_pair.secretKey, ctdistance2_exp, &result2);
+            context->Decrypt(key_pair.secretKey, ctdistance3_exp, &result3);
+            context->Decrypt(key_pair.secretKey, ctdistance1_rep, &result4);
+        }
+
+        // result1->SetLength(static_cast<size_t>(num_slot_dis1));
+        // result2->SetLength(static_cast<size_t>(num_slots1));
+        // result4->SetLength(static_cast<size_t>(num_slots2));
+
+
+        cout << "result1:" << result1 << endl;
+        cout << "result2:" << result2 << endl;
+        cout << "result3:" << result3 << endl;
+        cout << "result4:" << result4 << endl;
     }
 
-    // result1->SetLength(static_cast<size_t>(num_slot_dis1));
-    // result2->SetLength(static_cast<size_t>(num_slots1));
-    // result4->SetLength(static_cast<size_t>(num_slots2));
-
-
-    cout << "result1:" << result1 << endl;
-    cout << "result2:" << result2 << endl;
-    cout << "result3:" << result3 << endl;
-    cout << "result4:" << result4 << endl;
-
-
+    
     auto total_end = chrono::high_resolution_clock::now();
     auto total_duration = chrono::duration_cast<chrono::milliseconds>(total_end - total_start);
     cout << "\n[TIMING] Total execution time: " << total_duration.count() << " ms" << endl;
