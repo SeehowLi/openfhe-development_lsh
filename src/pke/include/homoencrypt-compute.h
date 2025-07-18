@@ -144,7 +144,8 @@ public:
 
     // Approximation of the k-scaled Sigmoid
     Cipher sigmoid(const Cipher& in, int n, int degree, int scaling);
-
+    Cipher sigmoid_tight(const Cipher& in, int n, int degree, int scaling);
+    
     // Rotate-and-sum elements at distance n
     Cipher rotsum(const Cipher& in, int n);
 

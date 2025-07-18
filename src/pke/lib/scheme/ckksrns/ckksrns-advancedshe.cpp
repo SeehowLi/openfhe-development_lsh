@@ -915,7 +915,7 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalChebyshevSeriesPS(ConstCiphertext<D
                                                                const std::vector<double>& coefficients, double a,
                                                                double b) const {
     uint32_t n = Degree(coefficients);
-
+    std::cout << "Start PS Chebyshev Series Evaluation" << std::endl;                                                          
     std::vector<double> f2 = coefficients;
 
     // Make sure the coefficients do not have the zero dominant terms

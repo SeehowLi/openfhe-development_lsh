@@ -584,15 +584,15 @@ void process_groups_to_1d() {
     training_data_1d = convert_group_to_1d(training_data, 128);
 
     // 打印转换结果的统计信息
-    cout << "\n=== 1D Conversion Results ===" << endl;
-    cout << "Training Data: " << training_data.size() << " rows -> " << training_data_1d.size() << " elements" << endl;
+    // cout << "\n=== 1D Conversion Results ===" << endl;
+    // cout << "Training Data: " << training_data.size() << " rows -> " << training_data_1d.size() << " elements" << endl;
 
     // 验证前几个元素
-    cout << "\nTraining Data (first 20 elements): ";
-    for (int i = 0; i < min(128, (int)training_data_1d.size()); i++) {
-        cout << fixed << setprecision(3) << training_data_1d[i] << " ";
-    }
-    cout << endl;
+    // cout << "\nTraining Data (first 20 elements): ";
+    // for (int i = 0; i < min(128, (int)training_data_1d.size()); i++) {
+    //     cout << fixed << setprecision(3) << training_data_1d[i] << " ";
+    // }
+    // cout << endl;
 }
 
 // 将query_data扩展重复128次的函数
@@ -698,9 +698,9 @@ int main() {
     // =============== 重要参数 =============== //
     int levels_required = 50;
     uint32_t ring_dim = 1 << 16; // 65536
-    double lowbound_dis = 0.0;
-    double upbound_dis = 0.9;
-    uint32_t sqrt_cheb_degree = 31; // 五层
+    double lowbound_dis = -0.6;
+    double upbound_dis = 0.6;
+    uint32_t sqrt_cheb_degree = 31; // 7层
     vector<int> rotations_distance;
     // 距离转换的掩码
     vector<double> distance_mask1;
@@ -776,7 +776,7 @@ int main() {
     {
         Timer timer("Subtraction");
 
-        ctminus = hec.sub(ctdata, ctqry32);
+        ctminus = hec.sub(ctdata, ctqry32)->Clone();
         cout << "Subtraction done!" << endl;
     }
 
@@ -786,7 +786,7 @@ int main() {
     {
         Timer timer("Squaring");
 
-        ctminus_square = hec.square(ctminus);
+        ctminus_square = hec.square(ctminus)->Clone();
         cout << "Square done!" << endl;
     }
     cout << "Current depth is: " << levels_required - ctminus_square->GetLevel() << endl;
@@ -795,21 +795,46 @@ int main() {
     // TODO:需要新的旋转密钥--放到前面的并行处理
     vector<double> bemask(num_slot_dis1 * num_slot_dis1);
     vector<double> afmask(num_slot_dis1 * num_slot_dis1);
+    vector<double> bemaskafter(num_slot_dis1 * num_slot_dis1);
+
     for (int i = 0; i < num_slot_dis1 * num_slot_dis1; i++) {
-        bemask[i] = ((i / num_slot_dis1) % 2 == 0) ? 1.0 : 0.0;  // 先128个1，再128个0
-        afmask[i] = ((i / num_slot_dis1) % 2 == 1) ? 1.0 : 0.0;  // 先128个0，再128个1
+        int row = i / num_slot_dis1;  // 当前是第几行（0-127）
+        int col = i % num_slot_dis1;  // 当前行内的位置（0-127）
+        
+        // bemask: 偶数行原本是1，但只有前100个保持为1
+        bemask[i] = (row % 2 == 0 && col < 100) ? 1.0 : 0.0;
+        // afmask: 奇数行原本是1，但只有前100个保持为1
+        afmask[i] = (row % 2 == 1 && col < 100) ? 1.0 : 0.0;
+
+        // bemask: 偶数行1
+        bemaskafter[i] = (row % 2 == 0 && col < 128) ? 1.0 : 0.0;
+        // afmask: 奇数行1
+        // afmaskafter[i] = (row % 2 == 1 && col < 128) ? 1.0 : 0.0;
+
     }
     auto pt_bemask = hec.encode(bemask, 1, ctminus_square->GetLevel(), num_slot);
     auto pt_afmask = hec.encode(afmask, 1, ctminus_square->GetLevel(), num_slot);
-    
+    auto pt_bemaskafter = hec.encode(bemaskafter, 1, ctminus_square->GetLevel(), num_slot);
+    // auto pt_afmaskafter = hec.encode(afmaskafter, 1, ctminus_square->GetLevel(), num_slot);
+
     vector<double> rep2exp_mask(num_slot, 0.0);
-    // 掩码的生成，每一组128个数，第x组的第x个数是1，其余是0
-    for (int i = 0; i < num_slot_dis1; i++) {
+    // 掩码的生成，每一组128个数，第x组的第x个数是1，其余是0，只看前100组有效数字
+    for (int i = 0; i < 100; i++) {
         rep2exp_mask[i * num_slot_dis1 + i] = 1.0;
+    }
+
+    // rep的mask，后28组全部是0
+    vector<double> rep_mask(num_slot_dis1 * num_slot_dis1, 0.0);
+
+    for (int i = 0; i < num_slot_dis1 * num_slot_dis1; i++) {
+        if (i / num_slot_dis1 < 100) {  // 判断是第几组
+            rep_mask[i] = 1.0;
+        }
     }
 
     /**
      * @brief 计算repeat和expand
+     * @todo 可以进行并行优化
      */
     Cipher ct_bemask, ct_afmask;
     Cipher ctdistance_rep;
@@ -817,8 +842,8 @@ int main() {
     {
         Timer timer("Expand Ciphertext");
         // #1先填满
-        ct_bemask= hec.mult(ctminus_square, pt_bemask);
-        ct_afmask = hec.mult(ctminus_square, pt_afmask);
+        ct_bemask= hec.mult(ctminus_square, pt_bemask)->Clone();
+        ct_afmask = hec.mult(ctminus_square, pt_afmask)->Clone();
 
         hec.add_inplace(ct_bemask, hec.rot(ct_bemask, -1 * num_slot_dis1));
         hec.add_inplace(ct_afmask, hec.rot(ct_afmask,      num_slot_dis1));
@@ -828,35 +853,23 @@ int main() {
             hec.add_inplace(ct_afmask, hec.rot(ct_afmask, pow(2, i)));
         }
         // #3后处理
-        ct_bemask = hec.mult(ct_bemask, pt_bemask);
-        ct_afmask = hec.mult(ct_afmask, pt_bemask);
-        ct_afmask = hec.rot(ct_afmask, -1 * num_slot_dis1);
+        ct_bemask = hec.mult(ct_bemask, pt_bemaskafter)->Clone();
+        ct_afmask = hec.mult(ct_afmask, pt_bemaskafter)->Clone();
+        ct_afmask = hec.rot(ct_afmask, -1 * num_slot_dis1)->Clone();
+        // 开四次方跟，拉大不同数值之间的距离
+        // ctdistance_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
+        //                             hec.add(ct_bemask, ct_afmask), lowbound_dis, upbound_dis, sqrt_cheb_degree);
+        ctdistance_rep = hec.add(ct_bemask, ct_afmask)->Clone();
 
-        ctdistance_rep = hec.chebyshev([](double x) -> double { return std::sqrt(x); }, 
-                                    hec.add(ct_bemask, ct_afmask), lowbound_dis, upbound_dis, sqrt_cheb_degree);
         auto pt_rep2exp_mask = hec.encode(rep2exp_mask, 1, ctdistance_rep->GetLevel(), num_slot);
-        ctdistance_exp = hec.mult(ctdistance_rep, pt_rep2exp_mask);
+        ctdistance_exp = hec.mult(ctdistance_rep, pt_rep2exp_mask)->Clone();
+
+        auto pt_rep_mask = hec.encode(rep_mask, 1, ctdistance_rep->GetLevel(), num_slot);
+        ctdistance_rep = hec.mult(ctdistance_rep, pt_rep_mask)->Clone();
     }
     cout << "Comsumed depth is: " << ctdistance_rep->GetLevel() << endl;
     cout << "Current depth is: " << levels_required - ctdistance_rep->GetLevel() << endl;
     
-    // 从repeat形式中提取标准距离（每128个取第一个）
-    vector<double> distance_extract_mask(num_slot, 0.0);
-    for (int i = 0; i < num_slot_dis1; i++) {
-        distance_extract_mask[i * num_slot_dis1] = 1.0;  // 每128个数的第一个为1
-    }
-    Plain pt_extract_mask = hec.encode(distance_extract_mask, 1, 
-                                       ctdistance_rep->GetLevel(), num_slot);
-
-    // 提取标准形式的距离
-    Cipher ctdistance_standard;
-    {
-        Timer timer("Extracting standard distances");
-        // 提取group1的100个距离值
-        ctdistance_standard = hec.mult(ctdistance_rep, pt_extract_mask);
-
-        cout << "Standard distances extracted" << endl;
-    }
                                    
     /**
      * @brief 计算expand
@@ -869,9 +882,52 @@ int main() {
             hec.add_inplace(ctdistance_exp, hec.rot(ctdistance_exp, num_slot_dis1 * pow(2, i)));
         }
     }
-
+    
     cout << "Comsumed depth is: " << ctdistance_exp->GetLevel() << endl;
     cout << "Current depth is: " << levels_required - ctdistance_exp->GetLevel() << endl;
+
+    double distance_bound = 0.5;
+    vector<double> const06_exp(num_slot_dis1 * num_slot_dis1, distance_bound);
+    vector<double> const06_rep(num_slot_dis1 * num_slot_dis1, distance_bound);
+    // 将每组的前100个数据设为0
+    for (int group = 0; group < num_slot_dis1; group++) {
+        for (int i = 0; i < 100; i++) {
+            const06_exp[group * num_slot_dis1 + i] = 0.0;
+        }
+    }
+    // const06_rep: 前100组设为0，后28组保持0.6
+    for (int group = 0; group < 100; group++) {
+        for (int i = 0; i < num_slot_dis1; i++) {
+            const06_rep[group * num_slot_dis1 + i] = 0.0;
+        }
+    }
+    auto pt_const06_exp = hec.encode(const06_exp, 1, ctdistance_exp->GetLevel(), num_slot);
+    auto pt_const06_rep = hec.encode(const06_rep, 1, ctdistance_rep->GetLevel(), num_slot);
+    ctdistance_exp = hec.add(ctdistance_exp, pt_const06_exp);
+    ctdistance_rep = hec.add(ctdistance_rep, pt_const06_rep);
+
+    // rep和exp做差得到delta,利用sigmod将delta计算成mask,以此来讲distance转换成index
+    auto ctdistance_del = hec.sub(ctdistance_exp, ctdistance_rep);
+    
+    auto ctdistance_del_pro = hec.chebyshev([](double x) -> double { return (std::exp(10 * x) - std::exp(-10 * x))/(std::exp(10 * x) + std::exp(-10 * x)); }, 
+                                    ctdistance_del, lowbound_dis, upbound_dis, sqrt_cheb_degree);
+
+    int distance_sig_degree = 2000; // Sigmoid的degree
+    int distance_sig_scaling = 9170; // Sigmoid的scaling
+    auto ct_distance_mask = hec.sigmoid_tight(ctdistance_del_pro, 1, distance_sig_degree, distance_sig_scaling);
+    
+    cout << "Comsumed depth is: " << ct_distance_mask->GetLevel() << endl;
+    cout << "Current depth is: " << levels_required - ct_distance_mask->GetLevel() << endl;
+
+    auto ctindex = ct_distance_mask->Clone();
+    // 旋转求和，得到整体数据的index
+    for(int i = 0; i < log(num_slot_dis1); i++) {
+        hec.add_inplace(ctindex, hec.rot(ctindex, num_slot_dis1 * pow(2, i)));
+    }
+
+    // vector<double> const05(num_slot, 0.5);
+    // auto pt_const05 = hec.encode(const05, 1, ctindex->GetLevel(), num_slot);
+    // ctindex = hec.add(ctindex, pt_const05);
 
 
     /**
@@ -886,48 +942,60 @@ int main() {
     
     // 根据precision自动设置参数
     if (sorting_params.precision >= 0.001) {
-        sorting_params.sigmoidScaling = 9170;
+        sorting_params.sigmoidScaling = 10000;
         sorting_params.sigmoidDegree = 16000;
         sorting_params.sincDegree = 119;  // 对于n=32
     }
 
     // 3. 验证提取的标准距离（可选，用于调试）
-    if (sorting_params.verbose) {
-        Plain test_standard1 = hec.decrypt(ctdistance_standard);
-        vector<double> test_values = hec.decode(test_standard1);
-        cout << "Standard distances for Group 1 (first 10): ";
-        for (int i = 0; i < min(10, 32); i++) {
-            cout << fixed << setprecision(4) << test_values[i] << " ";
-        }
-        cout << endl;
-    }
+    // if (sorting_params.verbose) {
+    //     Plain test_standard1 = hec.decrypt(ctdistance_standard);
+    //     vector<double> test_values = hec.decode(test_standard1);
+    //     cout << "Standard distances for Group 1 (first 10): ";
+    //     for (int i = 0; i < min(10, 32); i++) {
+    //         cout << fixed << setprecision(4) << test_values[i] << " ";
+    //     }
+    //     cout << endl;
+    // }
 
     // 4. 创建排序器
     cout << "\n=== Creating Permutation Sorter ===" << endl;
     auto sorter = SortingMethod::Create(sorting_params.method, hec, sorting_params);
 
     // 解密结果
-    Plain result1, result2, result3, result4;
+    Plain result1, result2, result3, result4, result5;
     
     {
         Timer timer("Decryption");
         
         result1 = hec.decrypt(ctdistance_exp);
         result2 = hec.decrypt(ctdistance_rep);
-        // result3 = hec.decrypt(ctdistance3_exp);
-        // result4 = hec.decrypt(ctdistance1_rep);
+        result3 = hec.decrypt(ctdistance_del_pro);
+        result4 = hec.decrypt(ct_distance_mask);
+        result5 = hec.decrypt(ctindex);
     }
+    
+    result1->SetLength(static_cast<size_t>(num_slot_dis1));
+    result2->SetLength(static_cast<size_t>(num_slot_dis1));
+    result3->SetLength(static_cast<size_t>(num_slot_dis1));
+    // result4->SetLength(static_cast<size_t>(num_slot_dis1));
+    // result5->SetLength(static_cast<size_t>(num_slot_dis1));
 
-    // result1->SetLength(static_cast<size_t>(num_slot_dis1));
-    // result2->SetLength(static_cast<size_t>(num_slots1));
-    // result4->SetLength(static_cast<size_t>(num_slots2));
 
-
-    cout << "result1:" << result1 << endl;
-    cout << "result2:" << result2 << endl;
+    // cout << "result1:" << result1 << endl;
+    // cout << "result2:" << result2 << endl;
     // cout << "result3:" << result3 << endl;
     // cout << "result4:" << result4 << endl;
+    // cout << "result5:" << result5 << endl;
+    for(size_t i=127; i < result4->GetLength(); i+= 128) {
+            cout << "result4[" << i << "]: " << result4->GetCKKSPackedValue()[i] << " ";
+        }
+    cout << endl;
 
+    for(size_t i=100; i < result4->GetLength(); i+= 128) {
+            cout << "result4[" << i << "]: " << result4->GetCKKSPackedValue()[i] << " ";
+        }
+    cout << endl;
 
     auto total_end = chrono::high_resolution_clock::now();
     auto total_duration = chrono::duration_cast<chrono::milliseconds>(total_end - total_start);

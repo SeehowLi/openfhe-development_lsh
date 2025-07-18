@@ -2,7 +2,7 @@
  * @Author: SeehowLi lsh0126@nudt.edu.cn
  * @Date: 2025-07-11 20:23:55
  * @LastEditors: SeehowLi lsh0126@nudt.edu.cn
- * @LastEditTime: 2025-07-16 15:25:45
+ * @LastEditTime: 2025-07-17 22:59:21
  * @FilePath: \openfhe-development\src\pke\lib\homoencrypt-compute.cpp
  * @Description: 
  * 
@@ -172,29 +172,43 @@ void HomoEncryptCompute::generate_context_knn(int num_slots, int levels_required
     context->EvalMultKeyGen(key_pair.secretKey);
 
     // 旋转密钥生成
-    #pragma omp parallel sections
-    {
-        #pragma omp section
-        {
-            vector<int> rotations;
-            for (int i = 0; i < log2(128); i++) {
-                rotations.push_back(pow(2, i) * 128);
-            }
-            context->EvalRotateKeyGen(key_pair.secretKey, rotations);
-        }
+    // #pragma omp parallel sections
+    // {
+    //     #pragma omp section
+    //     {
+    //         vector<int> rotations;
+    //         for (int i = 0; i < log2(128); i++) {
+    //             rotations.push_back(pow(2, i) * 128);
+    //             rotations.push_back(pow(2, i));
+    //         }
+    //         rotations.push_back(-128);
+    //         context->EvalRotateKeyGen(key_pair.secretKey, rotations);
+    //     }
         
-        #pragma omp section
-        {
-            vector<int> rotations2;
-            for (int i = 0; i < log2(num_slots); i++) {
-                rotations2.push_back(pow(2, i));
-            }
-            context->EvalRotateKeyGen(key_pair.secretKey, rotations2);
-        }
-        #pragma omp section
-        {
-            context->EvalRotateKeyGen(key_pair.secretKey, {-128, 128});
-        }
+    //     // #pragma omp section
+    //     // {
+    //     //     vector<int> rotations2;
+    //     //     for (int i = 0; i < log2(num_slots); i++) {
+    //     //         rotations2.push_back(pow(2, i));
+    //     //     }
+    //     //     context->EvalRotateKeyGen(key_pair.secretKey, rotations2);
+    //     // }
+    //     // #pragma omp section
+    //     // {
+    //     //     context->EvalRotateKeyGen(key_pair.secretKey, {-128});
+    //     // }
+    // }
+// 预计算所有需要的值
+    vector<int> rot_index_all;
+    for (int i = 0; i < log2(128); i++) {
+        rot_index_all.push_back(pow(2, i) * 128);
+        rot_index_all.push_back(pow(2, i));
+    }
+    rot_index_all.push_back(-128);
+    // 并行生成所有密钥
+    #pragma omp parallel for
+    for (int i = 0; i < static_cast<int>(rot_index_all.size()); i++) {
+        context->EvalRotateKeyGen(key_pair.secretKey, {rot_index_all[i]});
     }
 
 }
@@ -380,6 +394,16 @@ Cipher HomoEncryptCompute::chebyshev(std::function<double(double)> func,
 
 // 重点的函数近似
 Cipher HomoEncryptCompute::sigmoid(const Cipher &in, int n, int degree, int scaling) {
+    if (!context) {
+        throw std::runtime_error("Context not initialized");
+    }
+    return context->EvalChebyshevFunction([scaling, n](double x) -> double {
+        return 1/(n + n * pow(2.71828182846, -scaling*x));
+
+    }, in, -1, 1, degree);
+}
+
+Cipher HomoEncryptCompute::sigmoid_tight(const Cipher &in, int n, int degree, int scaling) {
     if (!context) {
         throw std::runtime_error("Context not initialized");
     }
