@@ -146,6 +146,9 @@ public:
     Cipher sigmoid(const Cipher& in, int n, int degree, int scaling);
     Cipher sigmoid_tight(const Cipher& in, int n, int degree, int scaling);
     
+    // sigmod和tanh的复合函数
+    Cipher sigmoid_tanh(const Cipher& in, int degree, int scaling, int scaling_tanh);
+
     // Rotate-and-sum elements at distance n
     Cipher rotsum(const Cipher& in, int n);
 

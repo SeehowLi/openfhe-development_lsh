@@ -99,6 +99,9 @@ int main() {
     parameters.SetScalingModSize(scaleModSize);
     parameters.SetBatchSize(batchSize);
 
+    // 支持复数运算
+    // parameters.SetExecutionMode(EXEC_NOISE_ESTIMATION);
+
     CryptoContext<DCRTPoly> cc = GenCryptoContext(parameters);
 
     // Enable the features that you wish to use
@@ -145,8 +148,16 @@ int main() {
     // Step 3: Encoding and encryption of inputs
 
     // Inputs--都是实数。。不是虚数-换成虚数试一下
-    std::vector<double> x1 = {0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0};
-    std::vector<double> x2 = {5.0, 4.0, 3.0, 2.0, 1.0, 0.75, 0.5, 0.25};
+    // std::vector<double> x1 = {0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0};
+    // std::vector<double> x2 = {5.0, 4.0, 3.0, 2.0, 1.0, 0.75, 0.5, 0.25};
+    std::vector<std::complex<double>> x1 = {std::complex<double>(0.25, 0.1), std::complex<double>(0.5, 0.2),
+                                            std::complex<double>(0.75, 0.3), std::complex<double>(1.0, 0.4),
+                                            std::complex<double>(2.0, 0.5), std::complex<double>(3.0, 0.6), 
+                                            std::complex<double>(4.0, 0.7), std::complex<double>(5.0, 0.8)};
+    std::vector<std::complex<double>> x2 = {std::complex<double>(5.0, 0.1), std::complex<double>(4.0, 0.2),
+                                            std::complex<double>(3.0, 0.3), std::complex<double>(2.0, 0.4),
+                                            std::complex<double>(1.0, 0.5), std::complex<double>(0.75, 0.6), 
+                                            std::complex<double>(0.5, 0.7), std::complex<double>(0.25, 0.8)};
 
     // Encoding as plaintexts--直接打包
     Plaintext ptxt1 = cc->MakeCKKSPackedPlaintext(x1);
@@ -182,7 +193,7 @@ int main() {
     // We set the cout precision to 8 decimal digits for a nicer output.
     // If you want to see the error/noise introduced by CKKS, bump it up
     // to 15 and it should become visible.
-    std::cout.precision(8);
+    std::cout.precision(16);
 
     std::cout << std::endl << "Results of homomorphic computations: " << std::endl;
 

@@ -69,6 +69,20 @@ int HomoEncryptCompute::generate_context_network(int num_slots, int levels_requi
     return circuit_depth;
 }
 
+void print_moduli_chain_detail(const DCRTPoly& poly){
+    int num_primes = poly.GetNumOfElements();
+    double total_bit_len = 0.0;
+    for (int i = 0; i < num_primes; i++) {
+        auto qi = poly.GetParams()->GetParams()[i]->GetModulus();
+        std::cout << "q_" << i << ": " 
+                    << qi
+                    << ",  log q_" << i <<": " << log(qi.ConvertToDouble()) / log(2)
+                    << std::endl;
+        total_bit_len += log(qi.ConvertToDouble()) / log(2);
+    }   
+    std::cout << "Total bit length: " << total_bit_len << std::endl;
+}
+
 // 用于设置context等加密参数--放在测试程序中，不用单独封装函数
 void HomoEncryptCompute::generate_context_permutation(int num_slots, int levels_required, bool toy) {
     CCParams<CryptoContextCKKSRNS> parameters;
@@ -130,9 +144,12 @@ void HomoEncryptCompute::generate_context_knn(int num_slots, int levels_required
     CCParams<CryptoContextCKKSRNS> parameters;
     
     parameters.SetSecretKeyDist(lbcrypto::UNIFORM_TERNARY);
+    // parameters.SetSecretKeyDist(lbcrypto::SPARSE_TERNARY);
 
-    int dcrtBits = 45;
-    int firstMod = 48;
+    int dcrtBits = 40;
+    int firstMod = 45;
+    // int dcrtBits = 43;
+    // int firstMod = 50;
 
     if (toy) {
         parameters.SetSecurityLevel(lbcrypto::HEStd_NotSet);
@@ -149,6 +166,7 @@ void HomoEncryptCompute::generate_context_knn(int num_slots, int levels_required
     parameters.SetBatchSize(num_slots);
 
     ScalingTechnique rescaleTech = FLEXIBLEAUTO;
+    // ScalingTechnique rescaleTech = FIXEDAUTO;
 
     parameters.SetScalingModSize(dcrtBits);
     parameters.SetScalingTechnique(rescaleTech);
@@ -156,7 +174,9 @@ void HomoEncryptCompute::generate_context_knn(int num_slots, int levels_required
 
     //This keeps memory small, at the cost of increasing the modulus
     parameters.SetNumLargeDigits(2);
-    // parameters.SetKeySwitchTechnique(HYBRID);
+    parameters.SetKeySwitchTechnique(HYBRID);
+    // parameters.SetDigitSize(30);
+    // parameters.SetKeySwitchTechnique(BV);
 
     parameters.SetMultiplicativeDepth(levels_required);
     
@@ -202,7 +222,12 @@ void HomoEncryptCompute::generate_context_knn(int num_slots, int levels_required
     vector<int> rot_index_all;
     for (int i = 0; i < log2(128); i++) {
         rot_index_all.push_back(pow(2, i) * 128);
-        rot_index_all.push_back(pow(2, i));
+        rot_index_all.push_back(pow(2, i));//左移
+        rot_index_all.push_back(-1*pow(2, i));//右移动
+
+    }
+    for (int i = 1; i < log2(128)+1; i++) {
+        rot_index_all.push_back((128 * 127) / pow(2,i));
     }
     rot_index_all.push_back(-128);
     // 并行生成所有密钥
@@ -211,7 +236,12 @@ void HomoEncryptCompute::generate_context_knn(int num_slots, int levels_required
         context->EvalRotateKeyGen(key_pair.secretKey, {rot_index_all[i]});
     }
 
+    const std::vector<DCRTPoly>& ckks_pk = key_pair.publicKey->GetPublicElements();
+    std::cout << "Moduli chain of pk: " << std::endl;
+    print_moduli_chain_detail(ckks_pk[0]);
+
 }
+
 
 // 可以当作测试函数的子函数
 void HomoEncryptCompute::generate_rotation_keys_network(int num_slots) {
@@ -408,11 +438,34 @@ Cipher HomoEncryptCompute::sigmoid_tight(const Cipher &in, int n, int degree, in
         throw std::runtime_error("Context not initialized");
     }
     return context->EvalChebyshevFunction([scaling, n](double x) -> double {
-        return 1/(n + n * pow(2.71828182846, -scaling*x));
+        return 1.0 - 1/(n + n * pow(2.71828182846, -scaling*x));
 
-    }, in, -1, 1, degree);
+    }, in, -0.15, 1.05, degree);
 }
 
+
+Cipher HomoEncryptCompute::sigmoid_tanh(const Cipher &in, int degree, int scaling, int scaling_tanh) {
+    if (!context) {
+        throw std::runtime_error("Context not initialized");
+    }
+
+    // 定义sigmoid函数
+    auto sigmoid = [scaling](double x) -> double {
+        return 1.0 / (1.0 + std::exp(-scaling * x));
+    };
+
+    // 定义tanh函数
+    auto tanh_func = [scaling_tanh](double x) -> double {
+        double exp_pos = std::exp(scaling_tanh * x);
+        double exp_neg = std::exp(-scaling_tanh * x);
+        return (exp_pos - exp_neg) / (exp_pos + exp_neg);
+    };
+
+    // 复合函数：sigmoid(tanh(x))
+    return context->EvalChebyshevFunction([sigmoid, tanh_func](double x) -> double {
+        return sigmoid(tanh_func(x));
+    }, in, -1.0, 1.0, degree);
+}
 
 Cipher HomoEncryptCompute::sinc(const Cipher &in, int poly_degree, int n) {
     return context->EvalChebyshevFunction([n](double x) -> double { return sin(3.14159265358979323846 * x * n) / (3.14159265358979323846 * x * n); },

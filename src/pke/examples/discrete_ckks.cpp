@@ -93,7 +93,8 @@ void StC_CtS_example() {
     // cc->EvalBootstrapPrecompute(numSlots);
 
     // 生成加密向量
-    std::vector<double> x = {0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0};
+    // std::vector<double> x = {0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0};
+    std::vector<double> x = {0.25, 0.5, 0.75, 1.0};
 
 
     // 生成明文多项式--稀疏打包
