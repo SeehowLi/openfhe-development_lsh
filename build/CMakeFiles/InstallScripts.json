@@ -1,0 +1,13 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/openfhe-development/build/cmake_install.cmake",
+		"D:/openfhe-development/build/src/core/cmake_install.cmake",
+		"D:/openfhe-development/build/src/pke/cmake_install.cmake",
+		"D:/openfhe-development/build/src/binfhe/cmake_install.cmake",
+		"D:/openfhe-development/build/third-party/google-benchmark/cmake_install.cmake",
+		"D:/openfhe-development/build/third-party/google-benchmark/src/cmake_install.cmake",
+		"D:/openfhe-development/build/benchmark/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
