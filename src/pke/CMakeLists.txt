@@ -91,6 +91,59 @@ if(BUILD_EXAMPLES)
     add_dependencies(allpke allpkeexamples)
 endif()
 
+
+###########################################################################################
+# Add workplace executables -- By SeehowLi
+set(PKEAPPS_WORKPLACE "")
+if(BUILD_WORKPLACE)
+    message(STATUS "Building PKE workplace programs")
+    
+    # 递归查找workplace目录及其子目录下的所有.cpp文件
+    file(GLOB_RECURSE PKE_WORKPLACE_SRC_FILES CONFIGURE_DEPENDS 
+        ${CMAKE_CURRENT_SOURCE_DIR}/workplace/*.cpp
+    )
+    
+    message(STATUS "Found ${CMAKE_CURRENT_SOURCE_DIR}/workplace/*.cpp files:")
+    foreach(file ${PKE_WORKPLACE_SRC_FILES})
+        message(STATUS "  - ${file}")
+    endforeach()
+    
+    # 为每个.cpp文件创建可执行文件
+    foreach(app ${PKE_WORKPLACE_SRC_FILES})
+        get_filename_component(exe ${app} NAME_WE)
+        
+        # 直接使用文件名，不加前缀
+        set(exe_name ${exe})
+        
+        # 检查是否已经存在同名目标
+        if(TARGET ${exe_name})
+            message(WARNING "Target ${exe_name} already exists! Skipping ${app}")
+            continue()
+        endif()
+        
+        message(STATUS "Creating executable: ${exe_name}")
+        add_executable(${exe_name} ${app})
+        set_property(TARGET ${exe_name} PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/workplace)
+        set(PKEAPPS_WORKPLACE ${PKEAPPS_WORKPLACE} ${exe_name})
+        target_link_libraries(${exe_name} ${PKELIBS} ${ADDITIONAL_LIBS})
+        
+        # 添加必要的包含路径
+        get_filename_component(app_dir ${app} DIRECTORY)
+        target_include_directories(${exe_name} PRIVATE 
+            "${CMAKE_CURRENT_SOURCE_DIR}/workplace"
+            "${app_dir}"
+        )
+    endforeach()
+    
+    # 创建 allpkeworkplace 目标
+    add_custom_target(allpkeworkplace)
+    if(PKEAPPS_WORKPLACE)
+        add_dependencies(allpkeworkplace ${PKEAPPS_WORKPLACE})
+    endif()
+    add_dependencies(allpke allpkeworkplace)
+endif()
+###########################################################################################
+
 set(PKEEXTRAS "")
 if(BUILD_EXTRAS)
     file(GLOB PKE_EXTRAS_SRC_FILES CONFIGURE_DEPENDS extras/*.cpp)

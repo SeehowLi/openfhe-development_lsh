@@ -477,6 +477,8 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
     double powP  = pow(2, p);
 
     int32_t deg = std::round(std::log2(qDouble / powP));
+    std::cout << "m_correctionFactor: " << m_correctionFactor << std::endl;
+    std::cout << "degree: " << deg << std::endl;
 #if NATIVEINT != 128
     if (deg > static_cast<int32_t>(m_correctionFactor) &&
         (cryptoParams->GetScalingTechnique() != COMPOSITESCALINGAUTO &&
@@ -486,6 +488,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
     }
 #endif
     uint32_t correction = m_correctionFactor - deg;
+    std::cout << "correction: " << correction << std::endl;
     double post         = std::pow(2, static_cast<double>(deg));
 
     // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
@@ -557,7 +560,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
             k            = K_UNIFORMEXT;
         }
     }
-
+    // 缩放因子在这里了！
     double constantEvalMult = pre * (1.0 / (k * N));
 
     cc->EvalMultInPlace(raised, constantEvalMult);
@@ -776,6 +779,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly> ciphert
 #if NATIVEINT != 128
     // 64-bit only: scale back the message to its original scale.
     uint64_t corFactor = static_cast<uint64_t>(1) << std::llround(correction);
+    std::cout << "Correction factor: " << corFactor << std::endl;
     algo->MultByIntegerInPlace(ctxtDec, corFactor);
 #endif
 
@@ -1502,6 +1506,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
     }
 
     if (slots == M / 4) {
+        // std::cout << "SlotsToCoeffsPrecompute: fully-packed mode" << std::endl;
         // fully-packed
         auto coeff = CoeffDecodingCollapse(A, rotGroup, levelBudget, flag_i);
 
@@ -1549,7 +1554,7 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
         //------------------------------------------------------------------------------
         // sparsely-packed mode
         //------------------------------------------------------------------------------
-
+        // std::cout << "SlotsToCoeffsPrecompute: sparsely-packed mode" << std::endl;
         auto coeff  = CoeffDecodingCollapse(A, rotGroup, levelBudget, false);
         auto coeffi = CoeffDecodingCollapse(A, rotGroup, levelBudget, true);
 

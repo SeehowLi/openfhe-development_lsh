@@ -42,9 +42,30 @@ void EvalLogisticExample();
 
 void EvalFunctionExample();
 
+class Timer {
+private:
+    std::chrono::high_resolution_clock::time_point start_time;
+    std::string task_name;
+    
+public:
+    Timer(const std::string& name) : task_name(name) {
+        start_time = std::chrono::high_resolution_clock::now();
+    }
+    
+    ~Timer() {
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        std::cout << "[TIMING] " << task_name << ": " << duration.count() << " ms" << std::endl;
+    }
+};
+
 int main(int argc, char* argv[]) {
-    EvalLogisticExample();
-    EvalFunctionExample();
+    
+    {
+        Timer timer("Chebyshev Function Evaluation Time for 2000 degree");
+        EvalLogisticExample();
+    }
+    // EvalFunctionExample();
     return 0;
 }
 
@@ -58,24 +79,24 @@ void EvalLogisticExample() {
     // In production environments, the security level should be set to
     // HEStd_128_classic, HEStd_192_classic, or HEStd_256_classic for 128-bit, 192-bit,
     // or 256-bit security, respectively.
-    parameters.SetSecurityLevel(HEStd_NotSet);
-    parameters.SetRingDim(1 << 10);
+    parameters.SetSecurityLevel(HEStd_128_classic);
+    parameters.SetRingDim(1 << 16);
 #if NATIVEINT == 128
     usint scalingModSize = 78;
     usint firstModSize   = 89;
 #else
-    usint scalingModSize = 50;
-    usint firstModSize   = 60;
+    usint scalingModSize = 35;
+    usint firstModSize   = 40;
 #endif
     parameters.SetScalingModSize(scalingModSize);
     parameters.SetFirstModSize(firstModSize);
 
     // Choosing a higher degree yields better precision, but a longer runtime.
-    uint32_t polyDegree = 16;
+    uint32_t polyDegree = 2000;
 
     // The multiplicative depth depends on the polynomial degree.
     // See the FUNCTION_EVALUATION.md file for a table mapping polynomial degrees to multiplicative depths.
-    uint32_t multDepth = 6;
+    uint32_t multDepth = 23;
 
     parameters.SetMultiplicativeDepth(multDepth);
     CryptoContext<DCRTPoly> cc = GenCryptoContext(parameters);

@@ -105,6 +105,7 @@ void SimpleBootstrapExample() {
     uint32_t levelsAvailableAfterBootstrap = 10;
     usint depth = levelsAvailableAfterBootstrap + FHECKKSRNS::GetBootstrapDepth(levelBudget, secretKeyDist);
     parameters.SetMultiplicativeDepth(depth);
+    std::cout << "Multiplicative depth set to " << depth << std::endl;
 
     CryptoContext<DCRTPoly> cryptoContext = GenCryptoContext(parameters);
 
