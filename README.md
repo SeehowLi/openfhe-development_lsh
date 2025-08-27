@@ -1,22 +1,9 @@
 OpenFHE - Open-Source Fully Homomorphic Encryption Library
 =====================================
+This is a fork from Openfhe library, I use it for my personal study.
+I mainly focus on CKKS scheme and do all the changes on it.
+Currently, I do my research on nonlinearal function and some applications on discrete CKKS(perhaps will make some improvement on discrete CKKS itselt). 
 
-Fully Homomorphic Encryption (FHE) is a powerful cryptographic primitive that enables performing computations over encrypted data without having access to the secret key.
-OpenFHE is an open-source FHE library that includes efficient implementations of all common FHE schemes:
-  * Brakerski/Fan-Vercauteren (BFV) scheme for integer arithmetic
-  * Brakerski-Gentry-Vaikuntanathan (BGV) scheme for integer arithmetic
-  * Cheon-Kim-Kim-Song (CKKS) scheme for real-number arithmetic (includes approximate bootstrapping)
-  * Ducas-Micciancio (DM/FHEW), Chillotti-Gama-Georgieva-Izabachene (CGGI/TFHE), and Lee-Micciancio-Kim-Choi-Deryabin-Eom-Yoo (LMKCDEY) schemes for evaluating Boolean circuits and arbitrary functions over larger plaintext spaces using lookup tables
-
-OpenFHE also includes the following multiparty extensions of FHE:
-  * Threshold FHE for BGV, BFV, and CKKS schemes
-  * Interactive bootstrapping for Threshold CKKS
-  * Proxy Re-Encryption for BGV, BFV, and CKKS schemes
-
-OpenFHE also supports switching between CKKS and FHEW/TFHE to evaluate non-smooth functions, e.g., comparison, using FHEW/TFHE functional bootstrapping.
-
-OpenFHE supports any GNU C++ compiler version 9 or above and clang C++ compiler version 10 or above. To achieve the best runtime performance, we recommend following the
-guidelines outlined in [building OpenFHE for best performance](https://github.com/openfheorg/openfhe-development/blob/main/docs/static_docs/Best_Performance.md).
 
 ## Links and Resources
 
