@@ -8,7 +8,7 @@
 ## An option has the value of ON or OFF
 ## See below for the list of options
 
-cmake_minimum_required(VERSION 3.16.3)
+cmake_minimum_required(VERSION 3.5.3)
 
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
@@ -56,6 +56,7 @@ if (EMSCRIPTEN)
     option(BUILD_STATIC "Set to ON to build static versions of the library"            ON  )
     option(BUILD_UNITTESTS "Set to ON to build unit tests for the library"             OFF )
     option(BUILD_EXAMPLES "Set to ON to build examples for the library"                OFF )
+    option(BUILD_WORKPLACE "Set to ON to build workplace programs"                     OFF ) #新加的，用来编译 
     option(BUILD_BENCHMARKS "Set to ON to build benchmarks for the library"            OFF )
     set(WITH_OPENMP OFF)
     message("OpenMP is not supported by Emscripten")
@@ -64,6 +65,7 @@ else()
     option(BUILD_STATIC "Set to ON to build static versions of the library"            OFF )
     option(BUILD_UNITTESTS "Set to ON to build unit tests for the library"             ON  )
     option(BUILD_EXAMPLES "Set to ON to build examples for the library"                ON  )
+    option(BUILD_WORKPLACE "Set to ON to build workplace programs"                     ON  ) #新加的，用来编译 
     option(BUILD_BENCHMARKS "Set to ON to build benchmarks for the library"            ON  )
     option(WITH_OPENMP "Use OpenMP to enable <omp.h>"                                  ON  )
 endif()
@@ -92,6 +94,7 @@ endif()
 ### Print options
 message(STATUS "BUILD_UNITTESTS:    ${BUILD_UNITTESTS}")
 message(STATUS "BUILD_EXAMPLES:     ${BUILD_EXAMPLES}")
+message(STATUS "BUILD_WORKPLACE:    ${BUILD_WORKPLACE}")# 新加的
 message(STATUS "BUILD_BENCHMARKS:   ${BUILD_BENCHMARKS}")
 message(STATUS "BUILD_EXTRAS:       ${BUILD_EXTRAS}")
 message(STATUS "BUILD_STATIC:       ${BUILD_STATIC}")
@@ -737,6 +740,10 @@ endif()
 
 if(BUILD_EXAMPLES)
     add_custom_target(allexamples DEPENDS allcoreexamples allpkeexamples allbinfheexamples)
+endif()
+
+if(BUILD_WORKPLACE)
+    add_custom_target(allworkplace DEPENDS allpkeworkplace)
 endif()
 
 if(BUILD_EXTRAS)
