@@ -1,8 +1,8 @@
 OpenFHE - Open-Source Fully Homomorphic Encryption Library
 =====================================
-This is a fork from Openfhe library, I use it for my personal study.
-I mainly focus on CKKS scheme and do all the changes on it.
-Currently, I do my research on nonlinearal function and some applications on discrete CKKS(perhaps will make some improvement on discrete CKKS itselt). 
+This is a fork from Openfhe library, I use it for my personal study.<br>
+I mainly focus on CKKS scheme and do all the changes on it.<br>
+Currently, I do my research on nonlinearal function and some applications on discrete CKKS(perhaps will make some improvement on discrete CKKS itselt). <br>
 
 
 ## Links and Resources
